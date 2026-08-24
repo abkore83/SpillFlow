@@ -3,6 +3,15 @@
 All notable changes to this project are documented here. SpillFlow follows
 [Semantic Versioning](https://semver.org/) after the `0.x` development series.
 
+## 0.3.0-alpha.4 - 2026-08-24
+
+- Added `ExceptByRecoverableSpill` with independent durable offsets for its primary and exclusion sources.
+- Keeps both sets of input chunks until the complete paired-partition graph is checkpointed.
+- Rebuilds interrupted paired-partition work without reopening either fully consumed source.
+- Checkpoints completed partition pairs and bounded at-least-once output progress.
+- Added operation-specific file tracking and recursive paired-partition cleanup.
+- Added simulated interruptions during primary input, exclusion input, partitioning, and output.
+
 ## 0.3.0-alpha.3 - 2026-08-24
 
 - Added `DistinctRecoverableSpill` with durable reading, partitioning, output, and completed phases.

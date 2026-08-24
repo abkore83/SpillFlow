@@ -15,7 +15,9 @@ internal static class PartitionPairRefiner
         bool materializeLeft,
         CancellationToken cancellationToken,
         bool allowOversizedLeaf = false,
-        int depth = 0)
+        int depth = 0,
+        string leftExtension = ".spill",
+        string rightExtension = ".spill")
         where TKey : notnull
     {
         var checkedPaths = materializeLeft ? new[] { leftPath, rightPath } : new[] { rightPath };
@@ -36,8 +38,8 @@ internal static class PartitionPairRefiner
         }
 
         var count = session.Options.RecursivePartitionCount;
-        await using var leftWriter = new PartitionWriter<TLeft>(session, count);
-        await using var rightWriter = new PartitionWriter<TRight>(session, count);
+        await using var leftWriter = new PartitionWriter<TLeft>(session, count, leftExtension);
+        await using var rightWriter = new PartitionWriter<TRight>(session, count, rightExtension);
 
         if (leftPath is not null && File.Exists(leftPath))
         {
@@ -75,7 +77,7 @@ internal static class PartitionPairRefiner
             }
             var leaves = await RefineAsync<TLeft, TRight, TKey>(left, right, session, leftKeySelector,
                 rightKeySelector, comparer, operation, materializeLeft, cancellationToken, allowOversizedLeaf,
-                depth + 1)
+                depth + 1, leftExtension, rightExtension)
                 .ConfigureAwait(false);
             result.AddRange(leaves);
         }

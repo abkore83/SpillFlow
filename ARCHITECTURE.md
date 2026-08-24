@@ -318,6 +318,14 @@ that leaf's key set, skips acknowledged unique values, and may replay only the
 unacknowledged tail. Callers must recover with equivalent key-selector and
 equality-comparer behavior.
 
+`ExceptByRecoverableSpill` adds a second durable reading phase. The primary
+source and exclusion-key source each have their own offset and immutable input
+chunks. Paired hash partitions are built and recursively refined while both
+input sets remain intact. Only an atomic output-phase checkpoint permits their
+deletion. During output, each pair loads its exclusion keys and source-key set
+under one memory lease. Completed pairs and periodic output positions are
+checkpointed, giving the same bounded at-least-once replay behavior.
+
 ## 10. Why the measured prototype was faster
 
 The benchmark evidence suggests several combined reasons:

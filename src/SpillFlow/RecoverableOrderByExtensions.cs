@@ -14,7 +14,9 @@ public enum SpillOperationPhase
     /// <summary>The operator completed and removed its temporary runs.</summary>
     Completed,
     /// <summary>The operator is replacing durable input files with hash partitions.</summary>
-    Partitioning
+    Partitioning,
+    /// <summary>The operator is reading its second resumable input.</summary>
+    ReadingSecondary
 }
 
 /// <summary>Reports a durable recoverable-operation checkpoint.</summary>
