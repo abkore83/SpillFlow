@@ -3,8 +3,8 @@
 SpillFlow is an experimental .NET 8 library for bounded-memory operations over
 `IAsyncEnumerable<T>`. It provides `OrderBySpill`, `DistinctSpill`,
 `ExceptBySpill`, `GroupJoinSpill`, `GroupJoinStreamSpill`,
-`DistinctRecoverableSpill`, `ExceptByRecoverableSpill`, and
-`GroupAggregateSpill`.
+`DistinctRecoverableSpill`, `ExceptByRecoverableSpill`,
+`GroupAggregateSpill`, and `GroupAggregateRecoverableSpill`.
 
 > **Alpha:** APIs, generated codec layout, and recovery file formats may change
 > before 1.0. Review [DRAWBACKS.md](DRAWBACKS.md) before production use.
@@ -12,7 +12,7 @@ SpillFlow is an experimental .NET 8 library for bounded-memory operations over
 ## Install
 
 ```powershell
-dotnet add package SpillFlow --version 0.3.0-alpha.4
+dotnet add package SpillFlow --version 0.3.0-alpha.5
 ```
 
 The package includes the codec source generator; no second analyzer package is
@@ -179,6 +179,28 @@ sets of input chunks remain available until the complete paired-partition graph
 is durably saved, so interrupted partitioning restarts locally. Output has the
 same at-least-once checkpoint window as recoverable distinct processing.
 
+Recoverable grouped aggregation is intended for long-running summaries such as
+account balances, transaction counts, and ledger totals:
+
+```csharp
+await foreach (var total in session.GroupAggregateRecoverableSpill(
+    (offset, cancellationToken) => ReadTransactionsFromOffset(offset, cancellationToken),
+    operationId: "daily-account-totals",
+    keySelector: transaction => transaction.AccountId,
+    seedFactory: () => 0L,
+    accumulate: (sum, transaction) => sum + transaction.AmountInCents,
+    resultSelector: (accountId, sum) => new AccountTotal(accountId, sum),
+    cancellationToken: cancellationToken))
+{
+    await WriteTotal(total, cancellationToken);
+}
+```
+
+The active partition is aggregated again after output interruption. Therefore
+the key selector, seed factory, accumulator, and result selector must be
+deterministic and free of external side effects. The downstream sink must handle
+the documented at-least-once replay window.
+
 ## Status
 
 This is a correctness-first prototype, not yet a production banking library.
@@ -187,8 +209,8 @@ fan-in, pooled asynchronous block I/O, disk quotas, abandoned-session cleanup,
 checksummed and schema-fingerprinted blocks, optional AES-GCM encryption,
 source-generated codecs, private per-user session directories, explicit caller
 checkpoints, operator-managed recovery for external ordering, recoverable
-distinct and ExceptBy processing, and optional process private-memory monitoring.
-Remaining production work includes extending recovery to join and aggregation operators,
+distinct, ExceptBy, and grouped aggregation, plus optional process private-memory
+monitoring. Remaining production work includes extending recovery to join operators,
 hot-key performance optimization, secure-deletion limitations, and statistically
 repeated benchmarks on multiple storage devices.
 

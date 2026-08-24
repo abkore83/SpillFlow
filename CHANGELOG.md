@@ -3,6 +3,14 @@
 All notable changes to this project are documented here. SpillFlow follows
 [Semantic Versioning](https://semver.org/) after the `0.x` development series.
 
+## 0.3.0-alpha.5 - 2026-08-24
+
+- Added `GroupAggregateRecoverableSpill` with durable input, partitioning, output, and completed phases.
+- Rebuilds interrupted partition work from local input chunks without reopening the source.
+- Recomputes only the active output partition after interruption without serializing arbitrary accumulator types.
+- Preserves deterministic first-seen key order for bounded at-least-once output checkpointing.
+- Added exact count-and-sum recovery tests for input, partition, and output interruptions.
+
 ## 0.3.0-alpha.4 - 2026-08-24
 
 - Added `ExceptByRecoverableSpill` with independent durable offsets for its primary and exclusion sources.

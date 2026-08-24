@@ -326,6 +326,14 @@ deletion. During output, each pair loads its exclusion keys and source-key set
 under one memory lease. Completed pairs and periodic output positions are
 checkpointed, giving the same bounded at-least-once replay behavior.
 
+`GroupAggregateRecoverableSpill` uses the single-source durable chunk and
+partition protocol. It deliberately does not serialize arbitrary accumulator
+objects. Instead, recovery rereads the active leaf and deterministically rebuilds
+its accumulator dictionary. A separate first-seen key list fixes group output
+order across restarts. Accumulator callbacks can run again and therefore must be
+deterministic and have no externally visible side effects. Only downstream
+output handling should perform idempotent or transactional effects.
+
 ## 10. Why the measured prototype was faster
 
 The benchmark evidence suggests several combined reasons:
