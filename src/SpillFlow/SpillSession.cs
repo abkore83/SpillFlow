@@ -133,6 +133,15 @@ public sealed class SpillSession : IAsyncDisposable
             ?? throw new InvalidDataException("Recovery checkpoint deserialized to null.");
     }
 
+    internal bool HasCheckpoint(string name) => File.Exists(CheckpointPath(name));
+
+    internal string ResolveSessionFile(string fileName)
+    {
+        if (string.IsNullOrWhiteSpace(fileName) || Path.GetFileName(fileName) != fileName)
+            throw new InvalidDataException("An operation checkpoint contains an unsafe file name.");
+        return Path.Combine(WorkingDirectory, fileName);
+    }
+
     /// <summary>Prevents disposal from deleting this session so it can be reopened with <see cref="Recover"/>.</summary>
     public void PreserveForRecovery()
     {

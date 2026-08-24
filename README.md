@@ -11,7 +11,7 @@ SpillFlow is an experimental .NET 8 library for bounded-memory operations over
 ## Install
 
 ```powershell
-dotnet add package SpillFlow --version 0.2.0-alpha.4
+dotnet add package SpillFlow --version 0.3.0-alpha.1
 ```
 
 The package includes the codec source generator; no second analyzer package is
@@ -121,16 +121,40 @@ Before a partition is materialized, SpillFlow applies
 `PartitionMemoryExpansionFactor` and fails with `SpillResourceLimitException`
 when the estimated retained state cannot fit safely inside the session budget.
 
+For long-running sorting jobs whose source can reopen at a record offset,
+`OrderByRecoverableSpill` checkpoints input runs, merge replacements, and output
+progress:
+
+```csharp
+await foreach (var row in session.OrderByRecoverableSpill(
+    (offset, cancellationToken) => ReadTransactionsFromOffset(offset, cancellationToken),
+    operationId: "daily-transactions",
+    keySelector: transaction => transaction.Timestamp,
+    outputCheckpointInterval: 1_000,
+    cancellationToken: cancellationToken))
+{
+    await WriteResult(row, cancellationToken);
+}
+```
+
+After an interruption, reopen the preserved directory with
+`SpillSession.Recover` and call the same operation ID. Reading resumes at the
+last durable run boundary, and merging resumes from the last durable run graph.
+Output is at-least-once: after a crash, up to `outputCheckpointInterval` records
+may be replayed. Applications needing exactly-once effects must make their sink
+and SpillFlow checkpoint part of an external transactional or idempotent design.
+
 ## Status
 
 This is a correctness-first prototype, not yet a production banking library.
 It now includes recursive partitioning, session memory leases, bounded merge
 fan-in, pooled asynchronous block I/O, disk quotas, abandoned-session cleanup,
 checksummed and schema-fingerprinted blocks, optional AES-GCM encryption,
-source-generated codecs, private per-user session directories, and explicit
-recovery checkpoints. Remaining production work includes automatic
-operator-level restart orchestration, heavy-key isolation, secure-deletion
-limitations, and statistically repeated benchmarks on multiple storage devices.
+source-generated codecs, private per-user session directories, explicit caller
+checkpoints, and operator-managed recovery for external ordering. Remaining
+production work includes extending operator recovery to hash operators,
+hot-key performance optimization, secure-deletion limitations, and statistically
+repeated benchmarks on multiple storage devices.
 
 ## Security
 

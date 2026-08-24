@@ -3,6 +3,16 @@
 All notable changes to this project are documented here. SpillFlow follows
 [Semantic Versioning](https://semver.org/) after the `0.x` development series.
 
+## 0.3.0-alpha.1 - 2026-08-24
+
+- Added `OrderByRecoverableSpill` with durable reading, merge, output, and completed phases.
+- Resumes input from the last completed run through a caller-supplied offset-aware source factory.
+- Uses crash-safe merge replacement: write the new run, save the checkpoint, then delete old runs.
+- Tracks current-pass and next-pass runs to preserve efficient bounded multi-pass merging.
+- Removes incomplete and superseded operation runs during recovery.
+- Added configurable at-least-once output checkpoint intervals and synchronous progress notifications.
+- Added simulated interruptions during input, merge, and output with verified recovery results.
+
 ## 0.2.0-alpha.4 - 2026-08-24
 
 - Made `OrderBySpill` stable for equal keys.

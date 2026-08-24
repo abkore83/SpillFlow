@@ -5,7 +5,7 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <PackageId>SpillFlow</PackageId>
-    <Version>0.2.0-alpha.4</Version>
+    <Version>0.3.0-alpha.1</Version>
     <Authors>Abhishek Kore</Authors>
     <Title>SpillFlow</Title>
     <Description>Bounded-memory asynchronous LINQ-style operations for .NET with encrypted, recoverable temporary storage.</Description>
@@ -17,7 +17,7 @@
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
     <PackageReadmeFile>README.md</PackageReadmeFile>
     <PackageRequireLicenseAcceptance>false</PackageRequireLicenseAcceptance>
-    <PackageReleaseNotes>Makes OrderBySpill stable for equal keys across bounded multi-pass merges.</PackageReleaseNotes>
+    <PackageReleaseNotes>Adds operator-managed recovery for resumable external OrderBy input, merge, and output phases.</PackageReleaseNotes>
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
     <IncludeSymbols>true</IncludeSymbols>
     <SymbolPackageFormat>snupkg</SymbolPackageFormat>

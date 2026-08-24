@@ -94,6 +94,7 @@ The operator layer provides:
 - `GroupJoinStreamSpill`
 - `GroupAggregateSpill`
 - `OrderBySpill`
+- `OrderByRecoverableSpill`
 
 Each operator uses an algorithm suited to its job. They share the same session
 and storage system.
@@ -282,9 +283,18 @@ A recovery manifest records the session identity, format versions, files, disk
 accounting, and caller checkpoints. SpillFlow writes checkpoint replacements to
 a flushed temporary file and then moves the file into place.
 
-Recovery validates versions and file names before accepting preserved data. It
-does not yet restart every internal operator phase automatically. The calling
-application must use the saved checkpoint to coordinate its restart.
+Recovery validates versions and file names before accepting preserved data.
+`OrderByRecoverableSpill` adds operator-managed phase recovery. Its source
+factory accepts a durable record offset. Each completed input run advances that
+offset. Merge replacement writes a complete new run, saves a state graph that
+references it, and only then deletes superseded inputs. A crash therefore
+leaves either the old graph or the new graph recoverable.
+
+During output, the operator checkpoints every configured number of records.
+Recovery skips the acknowledged prefix and replays any later records. This is
+an at-least-once boundary because SpillFlow cannot atomically commit an external
+consumer's side effect. Hash operators do not yet have operator-managed phase
+recovery and continue to use caller checkpoints.
 
 ## 10. Why the measured prototype was faster
 
@@ -355,7 +365,7 @@ SpillFlow is an alpha prototype, not yet a production banking library. Important
 remaining work includes:
 
 - reduce repeated disk scans when many left records share one oversized join key
-- automatically resume complete operator phases
+- extend operator-managed phase recovery from ordering to hash operators
 - run repeated benchmarks with confidence intervals
 - publish full hardware and storage details
 - test multiple operating systems and storage devices
