@@ -207,6 +207,13 @@ session memory budget. The input is not read a second time.
 5. Merge a limited number of runs at a time.
 6. Stream the final sorted result.
 
+Sorting is stable. Records receive an in-memory encounter sequence while a run
+is built, and that sequence breaks equal-key ties inside the run. Sequence
+numbers are not written to disk. During every merge pass, the earlier input run
+wins equal-key ties. Because runs represent contiguous source ranges and merge
+groups retain their order, equal-key records preserve source encounter order
+through the final output.
+
 `MergeFanIn` limits how many run readers may be opened by one merge. When there
 are too many runs, SpillFlow performs more than one merge pass. This trades some
 extra I/O for bounded file handles and buffers.
@@ -349,7 +356,6 @@ remaining work includes:
 
 - reduce repeated disk scans when many left records share one oversized join key
 - automatically resume complete operator phases
-- add stable sorting for equal keys when requested
 - run repeated benchmarks with confidence intervals
 - publish full hardware and storage details
 - test multiple operating systems and storage devices

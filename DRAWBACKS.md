@@ -14,6 +14,7 @@
 - Session directories use current-user-only Windows ACLs or owner-only Unix permissions by default.
 - Recovery reapplies private directory permissions before reading preserved data.
 - `GroupJoinStreamSpill` handles unsplittable hot-key groups with a bounded asynchronous match stream.
+- `OrderBySpill` preserves encounter order for equal keys across all merge passes.
 - Sessions support atomic typed checkpoints and explicit file recovery.
 
 ## Remaining production work
@@ -30,8 +31,8 @@
    checkpoint; the caller must resume from its saved source cursor.
 4. SpillFlow deletes temporary files normally, but cannot guarantee physical
    secure deletion on SSDs, copy-on-write filesystems, snapshots, or backups.
-5. Hash-based operators do not preserve encounter order, and `OrderBySpill` is
-   not stable for equal keys unless callers include a sequence tie-breaker.
+5. Hash-based operators such as `DistinctSpill`, `ExceptBySpill`, and the join
+   operators do not preserve source encounter order.
 6. JSON fallback remains available by default for compatibility. It is slower
    and less predictable than generated binary codecs; production callers should
    set `AllowJsonFallback` to `false`.

@@ -3,6 +3,13 @@
 All notable changes to this project are documented here. SpillFlow follows
 [Semantic Versioning](https://semver.org/) after the `0.x` development series.
 
+## 0.2.0-alpha.4 - 2026-08-24
+
+- Made `OrderBySpill` stable for equal keys.
+- In-memory run sorting uses encounter sequence as its tie-breaker without writing sequence metadata to disk.
+- Multi-pass merging uses original run order as the equal-key tie-breaker.
+- Added a forced multi-run, multi-pass stability test against LINQ `OrderBy` semantics.
+
 ## 0.2.0-alpha.3 - 2026-08-24
 
 - Added `GroupJoinStreamSpill`, which gives the result selector an asynchronous match stream instead of a materialized list.

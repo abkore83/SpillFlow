@@ -215,6 +215,27 @@ public sealed class SpillExtensionsTests
     }
 
     [Fact]
+    public async Task OrderBySpill_preserves_encounter_order_for_equal_keys_across_merge_passes()
+    {
+        await using var session = new SpillSession(new SpillOptions
+        {
+            MemoryLimitBytes = 64 * 1024,
+            MergeFanIn = 2,
+            PartitionCount = 16
+        });
+        var input = Enumerable.Range(0, 5_000)
+            .Select(index => new Row(index % 5, $"{index:D6}-{new string('s', 160)}"))
+            .ToArray();
+
+        var result = await CollectAsync(AsAsync(input).OrderBySpill(session, row => row.Id));
+        var expected = input.OrderBy(row => row.Id).Select(row => row.Value).ToArray();
+
+        Assert.Equal(expected, result.Select(row => row.Value));
+        Assert.True(session.Statistics.SpillFiles > session.Options.MergeFanIn);
+        Assert.True(session.Statistics.PeakOpenReaders <= session.Options.MergeFanIn);
+    }
+
+    [Fact]
     public async Task GroupJoinSpill_returns_matches_and_empty_groups()
     {
         await using var session = TinySession();

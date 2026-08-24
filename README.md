@@ -11,7 +11,7 @@ SpillFlow is an experimental .NET 8 library for bounded-memory operations over
 ## Install
 
 ```powershell
-dotnet add package SpillFlow --version 0.2.0-alpha.2
+dotnet add package SpillFlow --version 0.2.0-alpha.4
 ```
 
 The package includes the codec source generator; no second analyzer package is
@@ -114,7 +114,8 @@ matches directly from disk. This keeps memory bounded. Multiple left records
 for the same oversized key may rescan that disk partition, so callers should
 prefer grouped aggregation when they only need a count, sum, or other summary.
 
-Sorting enforces `MergeFanIn` through bounded multi-pass merging. Hash operators
+Sorting is stable for equal keys and enforces `MergeFanIn` through bounded
+multi-pass merging. Hash operators
 use the supplied equality comparer for both equality and partition routing.
 Before a partition is materialized, SpillFlow applies
 `PartitionMemoryExpansionFactor` and fails with `SpillResourceLimitException`

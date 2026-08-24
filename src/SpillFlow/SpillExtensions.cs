@@ -414,7 +414,7 @@ public static class SpillExtensions
         }
     }
 
-    /// <summary>Orders a sequence by key using bounded sorted runs and multi-pass merging.</summary>
+    /// <summary>Stably orders a sequence by key using bounded sorted runs and multi-pass merging.</summary>
     public static async IAsyncEnumerable<TSource> OrderBySpill<TSource, TKey>(
         this IAsyncEnumerable<TSource> source,
         SpillSession session,
@@ -424,18 +424,23 @@ public static class SpillExtensions
     {
         comparer ??= Comparer<TKey>.Default;
         var chunks = new List<string>();
-        var buffer = new List<TSource>();
+        var buffer = new List<(TSource Item, long Sequence)>();
+        var nextSequence = 0L;
         long bytes = 0;
 
         async ValueTask FlushAsync()
         {
             if (buffer.Count == 0) return;
-            buffer.Sort((a, b) => comparer.Compare(keySelector(a), keySelector(b)));
+            buffer.Sort((a, b) =>
+            {
+                var keyComparison = comparer.Compare(keySelector(a.Item), keySelector(b.Item));
+                return keyComparison != 0 ? keyComparison : a.Sequence.CompareTo(b.Sequence);
+            });
             var path = session.NewFile();
             await using var writer = new PooledRecordWriter<TSource>(
                 path, session, session.GetIoBlockSize(session.Options.MergeFanIn));
-            foreach (var item in buffer)
-                await writer.WriteAsync(item, cancellationToken);
+            foreach (var entry in buffer)
+                await writer.WriteAsync(entry.Item, cancellationToken);
             chunks.Add(path);
             buffer.Clear();
             bytes = 0;
@@ -445,19 +450,24 @@ public static class SpillExtensions
         {
             var readers = paths.Select(path => RecordFile.ReadAsync<TSource>(path, session, cancellationToken)
                 .GetAsyncEnumerator(cancellationToken)).ToArray();
-            var queue = new PriorityQueue<(TSource Item, int Reader), TKey>(comparer);
+            var priorityComparer = Comparer<(TKey Key, int Run)>.Create((a, b) =>
+            {
+                var keyComparison = comparer.Compare(a.Key, b.Key);
+                return keyComparison != 0 ? keyComparison : a.Run.CompareTo(b.Run);
+            });
+            var queue = new PriorityQueue<(TSource Item, int Reader), (TKey Key, int Run)>(priorityComparer);
             try
             {
                 for (var i = 0; i < readers.Length; i++)
                     if (await readers[i].MoveNextAsync())
-                        queue.Enqueue((readers[i].Current, i), keySelector(readers[i].Current));
+                        queue.Enqueue((readers[i].Current, i), (keySelector(readers[i].Current), i));
                 while (queue.TryDequeue(out var entry, out _))
                 {
                     yield return entry.Item;
                     if (await readers[entry.Reader].MoveNextAsync())
                     {
                         var next = readers[entry.Reader].Current;
-                        queue.Enqueue((next, entry.Reader), keySelector(next));
+                        queue.Enqueue((next, entry.Reader), (keySelector(next), entry.Reader));
                     }
                 }
             }
@@ -481,16 +491,20 @@ public static class SpillExtensions
         await foreach (var item in source.WithCancellation(cancellationToken))
         {
             session.ReadRecord();
-            buffer.Add(item);
-            bytes += RecordFile.EstimateSize(item, session) + 32;
+            buffer.Add((item, nextSequence++));
+            bytes += RecordFile.EstimateSize(item, session) + 40;
             if (bytes >= session.Options.MemoryLimitBytes * 3 / 4)
                 await FlushAsync();
         }
 
         if (chunks.Count == 0)
         {
-            buffer.Sort((a, b) => comparer.Compare(keySelector(a), keySelector(b)));
-            foreach (var item in buffer) yield return item;
+            buffer.Sort((a, b) =>
+            {
+                var keyComparison = comparer.Compare(keySelector(a.Item), keySelector(b.Item));
+                return keyComparison != 0 ? keyComparison : a.Sequence.CompareTo(b.Sequence);
+            });
+            foreach (var entry in buffer) yield return entry.Item;
             yield break;
         }
         await FlushAsync();
