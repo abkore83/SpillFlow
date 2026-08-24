@@ -1,3 +1,7 @@
+using System.Runtime.Versioning;
+using System.Security.AccessControl;
+using System.Security.Principal;
+
 namespace SpillFlow.Tests;
 
 public sealed class RecoveryTests
@@ -28,6 +32,7 @@ public sealed class RecoveryTests
             }
 
             Assert.True(Directory.Exists(workingDirectory));
+            RelaxDirectoryPermissions(workingDirectory);
             await using var recovered = SpillSession.Recover(workingDirectory, new SpillOptions
             {
                 TemporaryDirectory = root,
@@ -41,6 +46,7 @@ public sealed class RecoveryTests
             Assert.Equal(new[] { 10, 20 }, values);
             Assert.Equal(new RecoveryState(2, "source-42"), checkpoint);
             Assert.True(recovered.Statistics.CurrentDiskBytes > 0);
+            AssertPrivateDirectory(workingDirectory);
         }
         finally
         {
@@ -57,4 +63,54 @@ public sealed class RecoveryTests
     }
 
     private sealed record RecoveryState(int SourcePosition, string SourceToken);
+
+    private static void RelaxDirectoryPermissions(string path)
+    {
+        if (OperatingSystem.IsWindows())
+            AddWindowsEveryoneReadRule(path);
+        else
+            File.SetUnixFileMode(path, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute |
+                UnixFileMode.GroupRead | UnixFileMode.GroupExecute | UnixFileMode.OtherRead | UnixFileMode.OtherExecute);
+    }
+
+    private static void AssertPrivateDirectory(string path)
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            AssertPrivateWindowsDirectory(path);
+            return;
+        }
+
+        Assert.Equal(UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute,
+            File.GetUnixFileMode(path));
+    }
+
+    [SupportedOSPlatform("windows")]
+    private static void AddWindowsEveryoneReadRule(string path)
+    {
+        var directory = new DirectoryInfo(path);
+        var security = directory.GetAccessControl();
+        security.AddAccessRule(new FileSystemAccessRule(
+            new SecurityIdentifier(WellKnownSidType.WorldSid, null),
+            FileSystemRights.ReadAndExecute,
+            InheritanceFlags.ContainerInherit | InheritanceFlags.ObjectInherit,
+            PropagationFlags.None,
+            AccessControlType.Allow));
+        directory.SetAccessControl(security);
+    }
+
+    [SupportedOSPlatform("windows")]
+    private static void AssertPrivateWindowsDirectory(string path)
+    {
+        using var identity = WindowsIdentity.GetCurrent();
+        var user = Assert.IsType<SecurityIdentifier>(identity.User);
+        var security = new DirectoryInfo(path).GetAccessControl();
+        Assert.True(security.AreAccessRulesProtected);
+        var rules = security.GetAccessRules(true, false, typeof(SecurityIdentifier))
+            .Cast<FileSystemAccessRule>().ToArray();
+        var rule = Assert.Single(rules);
+        Assert.Equal(user, rule.IdentityReference);
+        Assert.Equal(AccessControlType.Allow, rule.AccessControlType);
+        Assert.True(rule.FileSystemRights.HasFlag(FileSystemRights.FullControl));
+    }
 }

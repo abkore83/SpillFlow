@@ -20,3 +20,17 @@ deadline or fix date is guaranteed while the project remains pre-1.0.
 SpillFlow does not provide secure deletion, process isolation, or protection
 against a compromised host. Applications handling regulated data must perform
 their own threat assessment and key-management review.
+
+## Temporary Files
+
+By default, each new Windows session directory is created atomically with a
+protected ACL that grants inheritable full control only to the current user.
+Unix session directories use owner-only `0700` permissions. Recovery reapplies
+these permissions before reading preserved files. If permission enforcement
+fails, session creation or recovery fails closed.
+
+`ProtectTemporaryDirectory = false` disables this protection for compatibility
+with unusual filesystems. Regulated workloads should not disable it without an
+equivalent external access-control policy. Directory permissions do not provide
+secure deletion, host isolation, or protection from administrators, backups,
+snapshots, or a compromised account.

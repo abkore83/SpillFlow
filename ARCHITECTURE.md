@@ -253,11 +253,15 @@ CPU. The goal is controlled resource use with useful performance.
 - CRC32 detects accidental block corruption.
 - Optional AES-GCM provides authenticated encryption for temporary blocks.
 - The caller owns and protects the encryption key.
+- Windows session directories are created atomically with a protected ACL that grants the current user inheritable full control.
+- Unix session directories use owner-only `0700` permissions.
+- Recovery reapplies private permissions before it reads the session manifest.
 - Disposing the session removes its temporary files.
 - Old abandoned session directories can be cleaned after a configured age.
 
-SpillFlow does not provide a key vault, guaranteed secure deletion, or complete
-platform-specific directory hardening.
+SpillFlow does not provide a key vault or guaranteed physical secure deletion.
+Permission failures stop session creation unless the caller explicitly sets
+`ProtectTemporaryDirectory` to `false` for compatibility.
 
 ## 9. Recovery strategy
 
@@ -339,7 +343,6 @@ remaining work includes:
 
 - isolate and stream extremely frequent join keys
 - automatically resume complete operator phases
-- strengthen file permissions for each supported platform
 - add stable sorting for equal keys when requested
 - run repeated benchmarks with confidence intervals
 - publish full hardware and storage details

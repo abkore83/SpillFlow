@@ -29,6 +29,8 @@ public sealed class SpillOptions
     public byte[]? EncryptionKey { get; init; }
     /// <summary>Gets whether unregistered record types may use the slower JSON fallback.</summary>
     public bool AllowJsonFallback { get; init; } = true;
+    /// <summary>Gets whether SpillFlow restricts each session directory to the current operating-system user.</summary>
+    public bool ProtectTemporaryDirectory { get; init; } = true;
 
     internal void Validate()
     {

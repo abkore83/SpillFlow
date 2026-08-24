@@ -10,7 +10,7 @@ SpillFlow is an experimental .NET 8 library for bounded-memory operations over
 ## Install
 
 ```powershell
-dotnet add package SpillFlow --version 0.2.0-alpha.1
+dotnet add package SpillFlow --version 0.2.0-alpha.2
 ```
 
 The package includes the codec source generator; no second analyzer package is
@@ -100,17 +100,20 @@ This is a correctness-first prototype, not yet a production banking library.
 It now includes recursive partitioning, session memory leases, bounded merge
 fan-in, pooled asynchronous block I/O, disk quotas, abandoned-session cleanup,
 checksummed and schema-fingerprinted blocks, optional AES-GCM encryption,
-source-generated codecs, and explicit recovery checkpoints. Remaining
-production work includes automatic operator-level restart orchestration,
-heavy-key isolation, restricted file permissions, and statistically repeated
-benchmarks on multiple storage devices.
+source-generated codecs, private per-user session directories, and explicit
+recovery checkpoints. Remaining production work includes automatic
+operator-level restart orchestration, heavy-key isolation, secure-deletion
+limitations, and statistically repeated benchmarks on multiple storage devices.
 
 ## Security
 
 Temporary blocks can be protected with a caller-managed AES-GCM key by setting
 `SpillOptions.EncryptionKey`. SpillFlow never stores or recovers the key. Do not
-hard-code production keys. See [SECURITY.md](SECURITY.md) for the reporting policy
-and [DRAWBACKS.md](DRAWBACKS.md) for current security boundaries.
+hard-code production keys. Session directories use a protected current-user-only
+ACL on Windows and owner-only `0700` permissions on Unix by default. Permission
+setup fails closed; `ProtectTemporaryDirectory = false` is an explicit compatibility
+escape hatch. See [SECURITY.md](SECURITY.md) for the reporting policy and
+[DRAWBACKS.md](DRAWBACKS.md) for current security boundaries.
 
 ## Contributing
 

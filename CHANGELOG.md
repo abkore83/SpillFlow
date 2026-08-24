@@ -3,6 +3,14 @@
 All notable changes to this project are documented here. SpillFlow follows
 [Semantic Versioning](https://semver.org/) after the `0.x` development series.
 
+## 0.2.0-alpha.2 - 2026-08-24
+
+- Creates Windows session directories atomically with a protected current-user-only ACL.
+- Creates Unix session directories with owner-only `0700` permissions.
+- Reapplies private permissions before reading a recovered session.
+- Added `ProtectTemporaryDirectory`; protection is enabled by default and permission failures fail closed.
+- Added platform-aware creation and recovery permission tests.
+
 ## 0.2.0-alpha.1 - 2026-08-24
 
 - Added a stable `SchemaId` contract to binary spill codecs.

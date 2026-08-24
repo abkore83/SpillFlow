@@ -66,13 +66,18 @@ public sealed class SpillSession : IAsyncDisposable
             SessionId = Guid.NewGuid().ToString("N");
             WorkingDirectory = Path.Combine(root, $"spillflow-{SessionId}");
             _createdUtc = DateTime.UtcNow;
-            Directory.CreateDirectory(WorkingDirectory);
+            if (Options.ProtectTemporaryDirectory)
+                SpillDirectorySecurity.CreatePrivate(WorkingDirectory);
+            else
+                Directory.CreateDirectory(WorkingDirectory);
             RecoveredFiles = [];
             WriteManifest();
         }
         else
         {
             WorkingDirectory = Path.GetFullPath(recoveryDirectory);
+            if (Options.ProtectTemporaryDirectory)
+                SpillDirectorySecurity.ProtectExisting(WorkingDirectory);
             var manifest = ReadManifest(WorkingDirectory);
             SessionId = manifest.SessionId;
             _createdUtc = manifest.CreatedUtc;

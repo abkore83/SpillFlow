@@ -5,7 +5,7 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <PackageId>SpillFlow</PackageId>
-    <Version>0.2.0-alpha.1</Version>
+    <Version>0.2.0-alpha.2</Version>
     <Authors>Abhishek Kore</Authors>
     <Title>SpillFlow</Title>
     <Description>Bounded-memory asynchronous LINQ-style operations for .NET with encrypted, recoverable temporary storage.</Description>
@@ -17,7 +17,7 @@
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
     <PackageReadmeFile>README.md</PackageReadmeFile>
     <PackageRequireLicenseAcceptance>false</PackageRequireLicenseAcceptance>
-    <PackageReleaseNotes>Adds schema-fingerprinted version 2 spill blocks and an option to disable JSON fallback.</PackageReleaseNotes>
+    <PackageReleaseNotes>Adds private per-user temporary directories on Windows and Unix, plus schema-safe version 2 blocks.</PackageReleaseNotes>
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
     <IncludeSymbols>true</IncludeSymbols>
     <SymbolPackageFormat>snupkg</SymbolPackageFormat>

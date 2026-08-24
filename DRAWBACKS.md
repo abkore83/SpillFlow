@@ -11,6 +11,8 @@
 - Compile-time codecs provide checked deterministic binary encoding.
 - Version 2 blocks carry codec/schema fingerprints and reject incompatible codecs before decoding.
 - Production callers can disable the JSON fallback and require registered binary codecs.
+- Session directories use current-user-only Windows ACLs or owner-only Unix permissions by default.
+- Recovery reapplies private directory permissions before reading preserved data.
 - Sessions support atomic typed checkpoints and explicit file recovery.
 
 ## Remaining production work
@@ -23,8 +25,8 @@
 3. Recovery restores checked files, disk accounting, and caller source state.
    Operators do not yet automatically restart their internal phase from a
    checkpoint; the caller must resume from its saved source cursor.
-4. Temporary-directory permissions and secure deletion need platform-specific
-   hardening for regulated banking deployments.
+4. SpillFlow deletes temporary files normally, but cannot guarantee physical
+   secure deletion on SSDs, copy-on-write filesystems, snapshots, or backups.
 5. Hash-based operators do not preserve encounter order, and `OrderBySpill` is
    not stable for equal keys unless callers include a sequence tie-breaker.
 6. JSON fallback remains available by default for compatibility. It is slower
@@ -39,5 +41,5 @@
 SpillFlow now addresses the original correctness and resource-control blockers,
 and its billion-row Distinct test completes under a 1 GiB managed-memory cap.
 It is still a pre-production library. Before banking deployment, prioritize
-heavy-key handling, operator-managed restart checkpoints, filesystem permission
-hardening, and broader soak testing.
+heavy-key handling, operator-managed restart checkpoints, secure-deletion policy,
+and broader soak testing.

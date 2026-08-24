@@ -1,10 +1,44 @@
 using System.Runtime.CompilerServices;
 using System.Security.Cryptography;
+using System.Security.AccessControl;
+using System.Security.Principal;
+using System.Runtime.Versioning;
 
 namespace SpillFlow.Tests;
 
 public sealed class SpillExtensionsTests
 {
+    [Fact]
+    public async Task Session_directory_is_restricted_to_the_current_user()
+    {
+        await using var session = new SpillSession();
+
+        if (OperatingSystem.IsWindows())
+            AssertPrivateWindowsDirectory(session.WorkingDirectory);
+        else
+        {
+            var mode = File.GetUnixFileMode(session.WorkingDirectory);
+            Assert.Equal(
+                UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute,
+                mode);
+        }
+    }
+
+    [SupportedOSPlatform("windows")]
+    private static void AssertPrivateWindowsDirectory(string path)
+    {
+        using var identity = WindowsIdentity.GetCurrent();
+        var user = Assert.IsType<SecurityIdentifier>(identity.User);
+        var security = new DirectoryInfo(path).GetAccessControl();
+        Assert.True(security.AreAccessRulesProtected);
+        var rules = security.GetAccessRules(true, false, typeof(SecurityIdentifier))
+            .Cast<FileSystemAccessRule>().ToArray();
+        var rule = Assert.Single(rules);
+        Assert.Equal(user, rule.IdentityReference);
+        Assert.Equal(AccessControlType.Allow, rule.AccessControlType);
+        Assert.True(rule.FileSystemRights.HasFlag(FileSystemRights.FullControl));
+    }
+
     private static async IAsyncEnumerable<T> AsAsync<T>(IEnumerable<T> values,
         [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
