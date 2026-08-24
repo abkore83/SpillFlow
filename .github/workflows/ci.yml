@@ -1,0 +1,37 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  build-test-pack:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+          cache: true
+          cache-dependency-path: '**/*.csproj'
+      - run: dotnet restore SpillFlow.sln
+      - run: dotnet build SpillFlow.sln -c Release --no-restore -p:ContinuousIntegrationBuild=true -p:TreatWarningsAsErrors=true
+      - run: dotnet test SpillFlow.sln -c Release --no-build --no-restore
+      - run: dotnet list SpillFlow.sln package --vulnerable --include-transitive
+      - if: runner.os == 'Linux'
+        run: dotnet pack src/SpillFlow/SpillFlow.csproj -c Release --no-build --no-restore -o artifacts/packages
+      - uses: actions/upload-artifact@v4
+        if: runner.os == 'Linux'
+        with:
+          name: nuget-packages
+          path: artifacts/packages/*.*nupkg
