@@ -334,6 +334,14 @@ order across restarts. Accumulator callbacks can run again and therefore must be
 deterministic and have no externally visible side effects. Only downstream
 output handling should perform idempotent or transactional effects.
 
+`GroupJoinStreamRecoverableSpill` applies the two-source protocol to left and
+right input chunks. Paired refinement checks whether the right side can be
+materialized. A shrinking partition uses an in-memory lookup under a lease; an
+unsplittable hot-key partition remains on disk and is filtered as an async match
+stream for each left record. Output checkpoints count completed left records.
+Recovery skips acknowledged left records without invoking the result selector
+and may recompute only the unacknowledged tail of the active pair.
+
 ## 10. Why the measured prototype was faster
 
 The benchmark evidence suggests several combined reasons:

@@ -5,7 +5,7 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <PackageId>SpillFlow</PackageId>
-    <Version>0.3.0-alpha.5</Version>
+    <Version>0.3.0-alpha.6</Version>
     <Authors>Abhishek Kore</Authors>
     <Title>SpillFlow</Title>
     <Description>Bounded-memory asynchronous LINQ-style operations for .NET with encrypted, recoverable temporary storage.</Description>
@@ -17,7 +17,7 @@
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
     <PackageReadmeFile>README.md</PackageReadmeFile>
     <PackageRequireLicenseAcceptance>false</PackageRequireLicenseAcceptance>
-    <PackageReleaseNotes>Adds recoverable grouped aggregation with durable input, partition reconstruction, deterministic group order, and bounded output replay.</PackageReleaseNotes>
+    <PackageReleaseNotes>Adds recoverable streaming group joins with independent input offsets, hot-key disk streaming, and bounded at-least-once output replay.</PackageReleaseNotes>
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
     <IncludeSymbols>true</IncludeSymbols>
     <SymbolPackageFormat>snupkg</SymbolPackageFormat>

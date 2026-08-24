@@ -19,6 +19,7 @@
 - `DistinctRecoverableSpill` resumes durable input, partition, and output phases without reopening a fully consumed source.
 - `ExceptByRecoverableSpill` independently resumes its primary and exclusion inputs, paired partitioning, and output.
 - `GroupAggregateRecoverableSpill` resumes durable input, partitioning, and deterministic aggregate output.
+- `GroupJoinStreamRecoverableSpill` resumes both inputs and preserves disk-streamed oversized match groups.
 - Sessions support atomic typed checkpoints and explicit file recovery.
 - Sessions can optionally sample process private memory, stop after crossing a configured threshold, and report the observed peak.
 
@@ -33,11 +34,11 @@
    group that cannot fit its memory lease. `GroupJoinStreamSpill` is the bounded
    alternative, but it may rescan an oversized right partition for each left
    record sharing that key.
-3. Operator-managed phase recovery covers ordering, distinct, ExceptBy, and
-   grouped aggregation. Join operators still rely on caller checkpoints.
-   Recoverable input requires source factories that can reopen at durable record
-   offsets. Output is at-least-once rather than exactly-once, and recovery must
-   use equivalent deterministic callback and comparer behavior.
+3. Operator-managed phase recovery covers ordering, distinct, ExceptBy, grouped
+   aggregation, and streaming joins. The materialized-list join still relies on
+   caller checkpoints; recoverable callers can use the streaming form instead.
+   Input factories must reopen at durable record offsets. Output is at-least-once,
+   and recovery must use equivalent deterministic callback and comparer behavior.
 4. SpillFlow deletes temporary files normally, but cannot guarantee physical
    secure deletion on SSDs, copy-on-write filesystems, snapshots, or backups.
 5. Hash-based operators such as `DistinctSpill`, `ExceptBySpill`, and the join

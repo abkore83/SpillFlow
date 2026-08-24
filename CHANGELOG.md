@@ -3,6 +3,15 @@
 All notable changes to this project are documented here. SpillFlow follows
 [Semantic Versioning](https://semver.org/) after the `0.x` development series.
 
+## 0.3.0-alpha.6 - 2026-08-24
+
+- Added `GroupJoinStreamRecoverableSpill` with independent durable left and right source offsets.
+- Rebuilds interrupted paired partitions without reopening fully consumed sources.
+- Preserves the bounded hot-key path by streaming unsplittable right partitions from disk.
+- Skips acknowledged left records without rerunning the result selector.
+- Bounds at-least-once replay to the uncheckpointed output tail in the active pair.
+- Added interruption tests for both inputs, partitioning, and oversized hot-key output.
+
 ## 0.3.0-alpha.5 - 2026-08-24
 
 - Added `GroupAggregateRecoverableSpill` with durable input, partitioning, output, and completed phases.

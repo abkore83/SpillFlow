@@ -4,7 +4,8 @@ SpillFlow is an experimental .NET 8 library for bounded-memory operations over
 `IAsyncEnumerable<T>`. It provides `OrderBySpill`, `DistinctSpill`,
 `ExceptBySpill`, `GroupJoinSpill`, `GroupJoinStreamSpill`,
 `DistinctRecoverableSpill`, `ExceptByRecoverableSpill`,
-`GroupAggregateSpill`, and `GroupAggregateRecoverableSpill`.
+`GroupAggregateSpill`, `GroupAggregateRecoverableSpill`, and
+`GroupJoinStreamRecoverableSpill`.
 
 > **Alpha:** APIs, generated codec layout, and recovery file formats may change
 > before 1.0. Review [DRAWBACKS.md](DRAWBACKS.md) before production use.
@@ -12,7 +13,7 @@ SpillFlow is an experimental .NET 8 library for bounded-memory operations over
 ## Install
 
 ```powershell
-dotnet add package SpillFlow --version 0.3.0-alpha.5
+dotnet add package SpillFlow --version 0.3.0-alpha.6
 ```
 
 The package includes the codec source generator; no second analyzer package is
@@ -201,6 +202,14 @@ the key selector, seed factory, accumulator, and result selector must be
 deterministic and free of external side effects. The downstream sink must handle
 the documented at-least-once replay window.
 
+`GroupJoinStreamRecoverableSpill` provides the same two independent source
+offsets as recoverable ExceptBy while preserving the streaming hot-key path.
+If a right partition cannot fit after recursive refinement, each left record's
+matches are filtered directly from disk and passed as an asynchronous stream.
+Acknowledged left records are skipped without rerunning the result selector.
+The selector must consume the match stream before returning and tolerate being
+called again for an uncheckpointed output after interruption.
+
 ## Status
 
 This is a correctness-first prototype, not yet a production banking library.
@@ -209,8 +218,9 @@ fan-in, pooled asynchronous block I/O, disk quotas, abandoned-session cleanup,
 checksummed and schema-fingerprinted blocks, optional AES-GCM encryption,
 source-generated codecs, private per-user session directories, explicit caller
 checkpoints, operator-managed recovery for external ordering, recoverable
-distinct, ExceptBy, and grouped aggregation, plus optional process private-memory
-monitoring. Remaining production work includes extending recovery to join operators,
+distinct, ExceptBy, grouped aggregation, and streaming joins, plus optional
+process private-memory monitoring. The materialized-list join remains available
+for groups that fit RAM; recoverable workloads should use the streaming join.
 hot-key performance optimization, secure-deletion limitations, and statistically
 repeated benchmarks on multiple storage devices.
 
