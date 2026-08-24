@@ -248,6 +248,15 @@ memory limit controls SpillFlow-owned retained state.
 It is not a hard limit for the whole process. The CLR, operating system, user
 callbacks, codecs, and other libraries can allocate memory outside the leases.
 
+For additional protection, callers may set `MaxProcessPrivateMemoryBytes`.
+The session samples process private memory at creation and at record or lease
+boundaries, throttled by `ProcessMemoryCheckInterval`. It stops with
+`SpillResourceLimitException` after an observed value crosses the threshold and
+reports the peak sample in session statistics. Because allocations can happen
+between samples, this is a safety tripwire rather than an operating-system
+enforced ceiling. Production services that require a hard boundary should also
+use a container, Windows Job Object, or equivalent service limit.
+
 ### Pooled asynchronous I/O
 
 SpillFlow rents reusable byte arrays from `ArrayPool`, fills blocks, and writes

@@ -11,7 +11,7 @@ SpillFlow is an experimental .NET 8 library for bounded-memory operations over
 ## Install
 
 ```powershell
-dotnet add package SpillFlow --version 0.3.0-alpha.1
+dotnet add package SpillFlow --version 0.3.0-alpha.2
 ```
 
 The package includes the codec source generator; no second analyzer package is
@@ -25,7 +25,8 @@ when disposed.
 ```csharp
 await using var session = new SpillSession(new SpillOptions
 {
-    MemoryLimitBytes = 256L * 1024 * 1024
+    MemoryLimitBytes = 256L * 1024 * 1024,
+    MaxProcessPrivateMemoryBytes = 1024L * 1024 * 1024
 });
 
 session.RegisterCodec(new TransactionSpillCodec());
@@ -121,6 +122,13 @@ Before a partition is materialized, SpillFlow applies
 `PartitionMemoryExpansionFactor` and fails with `SpillResourceLimitException`
 when the estimated retained state cannot fit safely inside the session budget.
 
+`MaxProcessPrivateMemoryBytes` is an optional process-wide safety tripwire.
+SpillFlow samples private memory at session creation and at record or lease
+boundaries, no more often than `ProcessMemoryCheckInterval`, and reports the
+largest observation in `PeakObservedProcessPrivateMemoryBytes`. Sampling cannot
+guarantee a hard ceiling between checks. Use a container, Windows Job Object,
+or service-level operating-system limit when strict process isolation is needed.
+
 For long-running sorting jobs whose source can reopen at a record offset,
 `OrderByRecoverableSpill` checkpoints input runs, merge replacements, and output
 progress:
@@ -151,7 +159,8 @@ It now includes recursive partitioning, session memory leases, bounded merge
 fan-in, pooled asynchronous block I/O, disk quotas, abandoned-session cleanup,
 checksummed and schema-fingerprinted blocks, optional AES-GCM encryption,
 source-generated codecs, private per-user session directories, explicit caller
-checkpoints, and operator-managed recovery for external ordering. Remaining
+checkpoints, operator-managed recovery for external ordering, and optional
+process private-memory monitoring. Remaining
 production work includes extending operator recovery to hash operators,
 hot-key performance optimization, secure-deletion limitations, and statistically
 repeated benchmarks on multiple storage devices.

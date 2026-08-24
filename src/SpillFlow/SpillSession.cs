@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Diagnostics;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
@@ -23,6 +24,9 @@ public sealed class SpillSession : IAsyncDisposable
     private bool _preserveForRecovery;
     private readonly DateTime _createdUtc;
     private readonly object _manifestLock = new();
+    private readonly Func<long> _processPrivateMemoryProvider;
+    private long _lastProcessMemoryCheckTick;
+    private long _peakObservedProcessPrivateMemory;
 
     /// <summary>Gets the validated options used by this session.</summary>
     public SpillOptions Options { get; }
@@ -45,17 +49,25 @@ public sealed class SpillSession : IAsyncDisposable
         _memoryPool.PeakLeasedBytes,
         Interlocked.Read(ref _blocksWritten),
         Interlocked.Read(ref _currentDiskBytes),
-        Interlocked.Read(ref _peakDiskBytes));
+        Interlocked.Read(ref _peakDiskBytes),
+        Interlocked.Read(ref _peakObservedProcessPrivateMemory));
 
     /// <summary>Creates a new spill session.</summary>
-    public SpillSession(SpillOptions? options = null) : this(options ?? new SpillOptions(), null)
+    public SpillSession(SpillOptions? options = null) : this(options ?? new SpillOptions(), null, null)
     {
     }
 
-    private SpillSession(SpillOptions options, string? recoveryDirectory)
+    internal SpillSession(SpillOptions options, Func<long> processPrivateMemoryProvider)
+        : this(options, null, processPrivateMemoryProvider)
+    {
+    }
+
+    private SpillSession(SpillOptions options, string? recoveryDirectory, Func<long>? processPrivateMemoryProvider)
     {
         Options = options;
         Options.Validate();
+        _processPrivateMemoryProvider = processPrivateMemoryProvider ?? ReadProcessPrivateMemory;
+        CheckProcessMemory("session creation", force: true);
         _memoryPool = new SpillMemoryPool((long)(Options.MemoryLimitBytes * 0.75));
         EncryptionKey = Options.EncryptionKey?.ToArray();
         var root = Options.TemporaryDirectory ?? Path.GetTempPath();
@@ -98,7 +110,7 @@ public sealed class SpillSession : IAsyncDisposable
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(workingDirectory);
         if (!Directory.Exists(workingDirectory)) throw new DirectoryNotFoundException(workingDirectory);
-        return new SpillSession(options ?? new SpillOptions { TemporaryDirectory = Path.GetDirectoryName(workingDirectory) }, workingDirectory);
+        return new SpillSession(options ?? new SpillOptions { TemporaryDirectory = Path.GetDirectoryName(workingDirectory) }, workingDirectory, null);
     }
 
     internal string NewFile(string extension = ".spill")
@@ -150,7 +162,11 @@ public sealed class SpillSession : IAsyncDisposable
         WriteManifest();
     }
 
-    internal void ReadRecord() => Interlocked.Increment(ref _recordsRead);
+    internal void ReadRecord()
+    {
+        CheckProcessMemory("reading a record");
+        Interlocked.Increment(ref _recordsRead);
+    }
 
     internal void ReaderOpened()
     {
@@ -188,7 +204,11 @@ public sealed class SpillSession : IAsyncDisposable
             $"{operation} partitions [{string.Join(", ", existing.Select(Path.GetFileName))}]");
     }
 
-    internal SpillMemoryLease AcquireMemoryLease(long bytes, string owner) => _memoryPool.Acquire(bytes, owner);
+    internal SpillMemoryLease AcquireMemoryLease(long bytes, string owner)
+    {
+        CheckProcessMemory($"acquiring memory for {owner}");
+        return _memoryPool.Acquire(bytes, owner);
+    }
 
     internal int GetIoBlockSize(int potentialWriters = 1)
     {
@@ -240,6 +260,7 @@ public sealed class SpillSession : IAsyncDisposable
 
     internal void WroteRecord(long bytes)
     {
+        CheckProcessMemory("writing a record");
         Interlocked.Increment(ref _recordsWritten);
         Interlocked.Add(ref _bytesWritten, bytes);
     }
@@ -315,6 +336,36 @@ public sealed class SpillSession : IAsyncDisposable
             if (value <= peak || Interlocked.CompareExchange(ref target, value, peak) == peak)
                 return;
         }
+    }
+
+    private void CheckProcessMemory(string operation, bool force = false)
+    {
+        var limit = Options.MaxProcessPrivateMemoryBytes;
+        if (limit is null)
+            return;
+
+        var now = Environment.TickCount64;
+        var intervalMilliseconds = (long)Math.Ceiling(Options.ProcessMemoryCheckInterval.TotalMilliseconds);
+        var previous = Interlocked.Read(ref _lastProcessMemoryCheckTick);
+        if (!force && intervalMilliseconds > 0 && previous != 0 && now - previous < intervalMilliseconds)
+            return;
+        Interlocked.Exchange(ref _lastProcessMemoryCheckTick, now);
+
+        var observed = _processPrivateMemoryProvider();
+        if (observed < 0)
+            throw new InvalidOperationException("The process private-memory provider returned a negative value.");
+        UpdatePeak(ref _peakObservedProcessPrivateMemory, observed);
+        if (observed > limit.Value)
+            throw new SpillResourceLimitException(
+                $"Process private memory exceeded the configured safety threshold while {operation}. " +
+                $"Observed {observed:N0} bytes; threshold {limit.Value:N0} bytes. This sampled tripwire is not a hard " +
+                "operating-system memory limit; use process or container limits when strict enforcement is required.");
+    }
+
+    private static long ReadProcessPrivateMemory()
+    {
+        using var process = Process.GetCurrentProcess();
+        return process.PrivateMemorySize64;
     }
 
     private static void CleanupAbandoned(string root, TimeSpan age)

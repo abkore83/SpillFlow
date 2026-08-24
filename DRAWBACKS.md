@@ -17,12 +17,15 @@
 - `OrderBySpill` preserves encounter order for equal keys across all merge passes.
 - `OrderByRecoverableSpill` resumes durable input-run, merge, and output phases.
 - Sessions support atomic typed checkpoints and explicit file recovery.
+- Sessions can optionally sample process private memory, stop after crossing a configured threshold, and report the observed peak.
 
 ## Remaining production work
 
-1. Memory leases bound SpillFlow-owned retained state, but cannot measure every
-   CLR/runtime allocation or memory used by user callbacks. `MemoryLimitBytes`
-   is therefore a library budget, not a hard process-memory guarantee.
+1. Memory leases bound SpillFlow-owned retained state. The optional process
+   private-memory monitor also observes CLR, callback, and other library memory,
+   but only at configured sampling points. Neither mechanism is a hard process
+   limit; production systems needing strict enforcement must use an operating-
+   system, container, or service-level memory limit.
 2. `GroupJoinSpill` requires an `IReadOnlyList` and therefore still rejects a
    group that cannot fit its memory lease. `GroupJoinStreamSpill` is the bounded
    alternative, but it may rescan an oversized right partition for each left

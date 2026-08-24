@@ -5,7 +5,7 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <PackageId>SpillFlow</PackageId>
-    <Version>0.3.0-alpha.1</Version>
+    <Version>0.3.0-alpha.2</Version>
     <Authors>Abhishek Kore</Authors>
     <Title>SpillFlow</Title>
     <Description>Bounded-memory asynchronous LINQ-style operations for .NET with encrypted, recoverable temporary storage.</Description>
@@ -17,7 +17,7 @@
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
     <PackageReadmeFile>README.md</PackageReadmeFile>
     <PackageRequireLicenseAcceptance>false</PackageRequireLicenseAcceptance>
-    <PackageReleaseNotes>Adds operator-managed recovery for resumable external OrderBy input, merge, and output phases.</PackageReleaseNotes>
+    <PackageReleaseNotes>Adds optional sampled process private-memory monitoring, threshold enforcement, and peak-memory telemetry.</PackageReleaseNotes>
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
     <IncludeSymbols>true</IncludeSymbols>
     <SymbolPackageFormat>snupkg</SymbolPackageFormat>

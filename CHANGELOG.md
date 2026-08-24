@@ -3,6 +3,14 @@
 All notable changes to this project are documented here. SpillFlow follows
 [Semantic Versioning](https://semver.org/) after the `0.x` development series.
 
+## 0.3.0-alpha.2 - 2026-08-24
+
+- Added an optional sampled process private-memory safety threshold.
+- Checks memory at session creation and record or memory-lease boundaries.
+- Added peak observed process private-memory telemetry to session statistics.
+- Added a configurable sampling interval to limit monitoring overhead.
+- Documented that operating-system or container limits are still required for a hard process-memory ceiling.
+
 ## 0.3.0-alpha.1 - 2026-08-24
 
 - Added `OrderByRecoverableSpill` with durable reading, merge, output, and completed phases.

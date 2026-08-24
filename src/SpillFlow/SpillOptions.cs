@@ -31,6 +31,10 @@ public sealed class SpillOptions
     public bool AllowJsonFallback { get; init; } = true;
     /// <summary>Gets whether SpillFlow restricts each session directory to the current operating-system user.</summary>
     public bool ProtectTemporaryDirectory { get; init; } = true;
+    /// <summary>Gets an optional process private-memory threshold used as a sampled safety tripwire.</summary>
+    public long? MaxProcessPrivateMemoryBytes { get; init; }
+    /// <summary>Gets the minimum interval between process private-memory samples.</summary>
+    public TimeSpan ProcessMemoryCheckInterval { get; init; } = TimeSpan.FromSeconds(1);
 
     internal void Validate()
     {
@@ -46,6 +50,9 @@ public sealed class SpillOptions
         ArgumentOutOfRangeException.ThrowIfGreaterThan(IoBlockSizeBytes, 16 * 1024 * 1024);
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(MaxDiskUsageBytes);
         ArgumentOutOfRangeException.ThrowIfLessThan(AbandonedSessionAge, TimeSpan.FromMinutes(1));
+        if (MaxProcessPrivateMemoryBytes is not null)
+            ArgumentOutOfRangeException.ThrowIfLessThan(MaxProcessPrivateMemoryBytes.Value, 1);
+        ArgumentOutOfRangeException.ThrowIfLessThan(ProcessMemoryCheckInterval, TimeSpan.Zero);
         if (EncryptionKey is not null && EncryptionKey.Length is not (16 or 24 or 32))
             throw new ArgumentException("EncryptionKey must contain 16, 24, or 32 bytes.", nameof(EncryptionKey));
     }
@@ -66,6 +73,7 @@ public sealed class SpillResourceLimitException(string message) : InvalidOperati
 /// <param name="BlocksWritten">The number of framed blocks written.</param>
 /// <param name="CurrentDiskBytes">The currently reserved physical spill bytes.</param>
 /// <param name="PeakDiskBytes">The greatest number of simultaneously reserved physical spill bytes.</param>
+/// <param name="PeakObservedProcessPrivateMemoryBytes">The greatest sampled process private-memory size.</param>
 public sealed record SpillStatistics(
     long RecordsRead,
     long RecordsWritten,
@@ -76,4 +84,5 @@ public sealed record SpillStatistics(
     long PeakLeasedBytes,
     long BlocksWritten,
     long CurrentDiskBytes,
-    long PeakDiskBytes);
+    long PeakDiskBytes,
+    long PeakObservedProcessPrivateMemoryBytes);

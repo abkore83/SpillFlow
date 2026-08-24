@@ -21,6 +21,11 @@ SpillFlow does not provide secure deletion, process isolation, or protection
 against a compromised host. Applications handling regulated data must perform
 their own threat assessment and key-management review.
 
+`MaxProcessPrivateMemoryBytes` is a sampled denial-of-service safety tripwire,
+not process isolation or a hard allocation limit. Use an operating-system or
+container memory limit when the process must be prevented from exceeding a
+fixed RAM budget.
+
 ## Temporary Files
 
 By default, each new Windows session directory is created atomically with a
