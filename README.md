@@ -109,3 +109,7 @@ dotnet run --project benchmarks/SpillFlow.Benchmarks -c Release -- 1000000
 
 See `BENCHMARK_RESULTS.md` for the isolated 100-million-record SpillFlow versus
 ExternalSort matrix under a 1 GiB cap, plus a supplemental billion-row result.
+
+For a simple but complete explanation of the architecture, operator algorithms,
+resource strategy, ExternalSort comparison, benchmark evidence, and current
+limits, see [ARCHITECTURE.md](ARCHITECTURE.md).
