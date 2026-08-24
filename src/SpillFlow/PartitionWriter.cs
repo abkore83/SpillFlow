@@ -8,11 +8,11 @@ internal sealed class PartitionWriter<T> : IAsyncDisposable
 
     public IReadOnlyList<string> Paths => _paths;
 
-    public PartitionWriter(SpillSession session, int? partitionCount = null)
+    public PartitionWriter(SpillSession session, int? partitionCount = null, string extension = ".spill")
     {
         _session = session;
         _paths = Enumerable.Range(0, partitionCount ?? session.Options.PartitionCount)
-            .Select(_ => session.NewFile()).ToArray();
+            .Select(_ => session.NewFile(extension)).ToArray();
         _writers = new PooledRecordWriter<T>[_paths.Length];
     }
 

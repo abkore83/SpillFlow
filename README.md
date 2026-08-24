@@ -2,8 +2,8 @@
 
 SpillFlow is an experimental .NET 8 library for bounded-memory operations over
 `IAsyncEnumerable<T>`. It provides `OrderBySpill`, `DistinctSpill`,
-`ExceptBySpill`, `GroupJoinSpill`, `GroupJoinStreamSpill`, and
-`GroupAggregateSpill`.
+`ExceptBySpill`, `GroupJoinSpill`, `GroupJoinStreamSpill`,
+`DistinctRecoverableSpill`, and `GroupAggregateSpill`.
 
 > **Alpha:** APIs, generated codec layout, and recovery file formats may change
 > before 1.0. Review [DRAWBACKS.md](DRAWBACKS.md) before production use.
@@ -11,7 +11,7 @@ SpillFlow is an experimental .NET 8 library for bounded-memory operations over
 ## Install
 
 ```powershell
-dotnet add package SpillFlow --version 0.3.0-alpha.2
+dotnet add package SpillFlow --version 0.3.0-alpha.3
 ```
 
 The package includes the codec source generator; no second analyzer package is
@@ -152,6 +152,26 @@ Output is at-least-once: after a crash, up to `outputCheckpointInterval` records
 may be replayed. Applications needing exactly-once effects must make their sink
 and SpillFlow checkpoint part of an external transactional or idempotent design.
 
+Recoverable distinct processing uses the same offset-aware source contract:
+
+```csharp
+await foreach (var row in session.DistinctRecoverableSpill(
+    (offset, cancellationToken) => ReadTransactionsFromOffset(offset, cancellationToken),
+    operationId: "unique-transactions",
+    keySelector: transaction => transaction.Id,
+    outputCheckpointInterval: 1_000,
+    cancellationToken: cancellationToken))
+{
+    await WriteUniqueResult(row, cancellationToken);
+}
+```
+
+It checkpoints durable input chunks before partitioning. Raw chunks are deleted
+only after the complete recursively refined partition graph is checkpointed, so
+interrupted partition construction can restart without reopening the source.
+Output is at-least-once and may replay up to the configured interval within the
+current partition. Recovery must use equivalent key-selector and comparer logic.
+
 ## Status
 
 This is a correctness-first prototype, not yet a production banking library.
@@ -159,9 +179,9 @@ It now includes recursive partitioning, session memory leases, bounded merge
 fan-in, pooled asynchronous block I/O, disk quotas, abandoned-session cleanup,
 checksummed and schema-fingerprinted blocks, optional AES-GCM encryption,
 source-generated codecs, private per-user session directories, explicit caller
-checkpoints, operator-managed recovery for external ordering, and optional
-process private-memory monitoring. Remaining
-production work includes extending operator recovery to hash operators,
+checkpoints, operator-managed recovery for external ordering, recoverable
+distinct processing, and optional process private-memory monitoring. Remaining
+production work includes extending recovery to the other hash operators,
 hot-key performance optimization, secure-deletion limitations, and statistically
 repeated benchmarks on multiple storage devices.
 

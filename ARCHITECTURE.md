@@ -302,8 +302,21 @@ leaves either the old graph or the new graph recoverable.
 During output, the operator checkpoints every configured number of records.
 Recovery skips the acknowledged prefix and replays any later records. This is
 an at-least-once boundary because SpillFlow cannot atomically commit an external
-consumer's side effect. Hash operators do not yet have operator-managed phase
-recovery and continue to use caller checkpoints.
+consumer's side effect. Other hash operators continue to use caller checkpoints.
+
+`DistinctRecoverableSpill` extends this model to the first hash operator. It
+writes memory-sized input chunks and saves the source offset only after each
+chunk is closed. It then builds and recursively refines a new partition graph
+while retaining all raw chunks. The output checkpoint is saved before those
+chunks are deleted. A crash during partitioning can therefore discard partial
+partition files and rebuild from durable local input without reopening the
+original source.
+
+Distinct output is processed one leaf at a time. The checkpoint records
+completed leaves and periodic progress inside the active leaf. Recovery rebuilds
+that leaf's key set, skips acknowledged unique values, and may replay only the
+unacknowledged tail. Callers must recover with equivalent key-selector and
+equality-comparer behavior.
 
 ## 10. Why the measured prototype was faster
 

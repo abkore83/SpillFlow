@@ -3,6 +3,16 @@
 All notable changes to this project are documented here. SpillFlow follows
 [Semantic Versioning](https://semver.org/) after the `0.x` development series.
 
+## 0.3.0-alpha.3 - 2026-08-24
+
+- Added `DistinctRecoverableSpill` with durable reading, partitioning, output, and completed phases.
+- Resumes input from the last completed chunk through an offset-aware source factory.
+- Keeps raw input chunks until the recursively refined partition graph is durably checkpointed.
+- Rebuilds interrupted partition work without reopening the source.
+- Checkpoints completed partitions and bounded at-least-once output progress.
+- Cleans incomplete, superseded, and already-consumed operation files during recovery.
+- Added simulated interruptions during input, partitioning, and output.
+
 ## 0.3.0-alpha.2 - 2026-08-24
 
 - Added an optional sampled process private-memory safety threshold.

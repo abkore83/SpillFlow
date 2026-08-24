@@ -5,14 +5,16 @@ namespace SpillFlow;
 /// <summary>Identifies a durable phase of a recoverable spill operation.</summary>
 public enum SpillOperationPhase
 {
-    /// <summary>The operator is reading its resumable source and creating sorted runs.</summary>
+    /// <summary>The operator is reading its resumable source and creating durable input files.</summary>
     Reading,
     /// <summary>The operator is replacing groups of runs with durable merged runs.</summary>
     Merging,
     /// <summary>The operator is streaming its final durable output.</summary>
     Output,
     /// <summary>The operator completed and removed its temporary runs.</summary>
-    Completed
+    Completed,
+    /// <summary>The operator is replacing durable input files with hash partitions.</summary>
+    Partitioning
 }
 
 /// <summary>Reports a durable recoverable-operation checkpoint.</summary>

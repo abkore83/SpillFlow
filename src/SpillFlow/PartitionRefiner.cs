@@ -9,7 +9,8 @@ internal static class PartitionRefiner
         IEqualityComparer<TKey> comparer,
         string operation,
         CancellationToken cancellationToken,
-        int depth = 0)
+        int depth = 0,
+        string extension = ".spill")
         where TKey : notnull
     {
         if (session.CanPartitionFit(path))
@@ -22,7 +23,7 @@ internal static class PartitionRefiner
                 $"after {depth} refinement levels. Increase MemoryLimitBytes or investigate a hot key.");
         }
 
-        await using var writer = new PartitionWriter<TSource>(session, session.Options.RecursivePartitionCount);
+        await using var writer = new PartitionWriter<TSource>(session, session.Options.RecursivePartitionCount, extension);
         await foreach (var item in RecordFile.ReadAsync<TSource>(path, session, cancellationToken).ConfigureAwait(false))
         {
             var key = keySelector(item);
@@ -38,7 +39,7 @@ internal static class PartitionRefiner
             if (!File.Exists(child))
                 continue;
             var leaves = await RefineAsync<TSource, TKey>(child, session, keySelector, comparer, operation,
-                cancellationToken, depth + 1).ConfigureAwait(false);
+                cancellationToken, depth + 1, extension).ConfigureAwait(false);
             result.AddRange(leaves);
         }
         return result;

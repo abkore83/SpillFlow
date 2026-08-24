@@ -16,6 +16,7 @@
 - `GroupJoinStreamSpill` handles unsplittable hot-key groups with a bounded asynchronous match stream.
 - `OrderBySpill` preserves encounter order for equal keys across all merge passes.
 - `OrderByRecoverableSpill` resumes durable input-run, merge, and output phases.
+- `DistinctRecoverableSpill` resumes durable input, partition, and output phases without reopening a fully consumed source.
 - Sessions support atomic typed checkpoints and explicit file recovery.
 - Sessions can optionally sample process private memory, stop after crossing a configured threshold, and report the observed peak.
 
@@ -30,10 +31,11 @@
    group that cannot fit its memory lease. `GroupJoinStreamSpill` is the bounded
    alternative, but it may rescan an oversized right partition for each left
    record sharing that key.
-3. Operator-managed phase recovery currently covers `OrderByRecoverableSpill`.
-   Hash partition operators still rely on caller checkpoints. Recoverable input
-   also requires a source factory that can reopen at a durable record offset.
-   Output delivery is at-least-once rather than exactly-once.
+3. Operator-managed phase recovery covers `OrderByRecoverableSpill` and
+   `DistinctRecoverableSpill`. Other hash operators still rely on caller
+   checkpoints. Recoverable input requires a source factory that can reopen at
+   a durable record offset. Output is at-least-once rather than exactly-once,
+   and recovery must use equivalent selector and comparer behavior.
 4. SpillFlow deletes temporary files normally, but cannot guarantee physical
    secure deletion on SSDs, copy-on-write filesystems, snapshots, or backups.
 5. Hash-based operators such as `DistinctSpill`, `ExceptBySpill`, and the join
