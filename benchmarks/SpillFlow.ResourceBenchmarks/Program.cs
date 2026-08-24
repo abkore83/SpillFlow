@@ -253,6 +253,7 @@ public sealed class AggregateRow
 
 public sealed class BankRowCodec : ISpillCodec<BankRow>
 {
+    public string SchemaId => "spillflow-resource-benchmarks:bank-row:v1";
     public byte[] Encode(BankRow value)
     {
         var bytes = new byte[12];

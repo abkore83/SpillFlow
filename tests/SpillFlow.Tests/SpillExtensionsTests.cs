@@ -250,6 +250,36 @@ public sealed class SpillExtensionsTests
     }
 
     [Fact]
+    public async Task Block_rejects_a_different_registered_codec_schema()
+    {
+        await using var session = TinySession().RegisterCodec(new RowCodec());
+        var path = session.NewFile();
+        await using (var writer = new PooledRecordWriter<Row>(path, session))
+            await writer.WriteAsync(new Row(42, "ignored"), CancellationToken.None);
+
+        session.RegisterCodec(new ChangedRowCodec());
+        var error = await Assert.ThrowsAsync<InvalidDataException>(
+            () => CollectAsync(RecordFile.ReadAsync<Row>(path, session)));
+
+        Assert.Contains("schema fingerprint", error.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task Strict_codec_mode_rejects_an_unregistered_record_type()
+    {
+        await using var session = new SpillSession(new SpillOptions
+        {
+            MemoryLimitBytes = 64 * 1024,
+            AllowJsonFallback = false
+        });
+        var path = session.NewFile();
+
+        var error = Assert.Throws<InvalidOperationException>(() => new PooledRecordWriter<Row>(path, session));
+
+        Assert.Contains("JSON fallback is disabled", error.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
     public async Task GroupAggregateSpill_computes_count_and_sum_per_key()
     {
         await using var session = new SpillSession(new SpillOptions
@@ -315,8 +345,17 @@ public sealed class SpillExtensionsTests
 
     private sealed class RowCodec : ISpillCodec<Row>
     {
+        public string SchemaId => "spillflow-tests:row:id-int32:v1";
         public byte[] Encode(Row value) => BitConverter.GetBytes(value.Id);
         public Row Decode(ReadOnlySpan<byte> bytes) => new(BitConverter.ToInt32(bytes), "decoded");
         public int GetEncodedSize(Row value) => sizeof(int);
+    }
+
+    private sealed class ChangedRowCodec : ISpillCodec<Row>
+    {
+        public string SchemaId => "spillflow-tests:row:id-int64:v2";
+        public byte[] Encode(Row value) => BitConverter.GetBytes((long)value.Id);
+        public Row Decode(ReadOnlySpan<byte> bytes) => new((int)BitConverter.ToInt64(bytes), "changed");
+        public int GetEncodedSize(Row value) => sizeof(long);
     }
 }

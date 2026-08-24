@@ -11,10 +11,12 @@ internal sealed class PooledRecordWriter<T> : IAsyncDisposable
     private byte[]? _buffer;
     private int _position;
     private SpillMemoryLease? _bufferLease;
+    private readonly byte[] _schemaFingerprint;
 
     public PooledRecordWriter(string path, SpillSession session, int? blockSize = null)
     {
         _session = session;
+        _schemaFingerprint = session.GetSchemaFingerprint<T>();
         _buffer = ArrayPool<byte>.Shared.Rent(blockSize ?? session.GetIoBlockSize());
         try
         {
@@ -123,7 +125,8 @@ internal sealed class PooledRecordWriter<T> : IAsyncDisposable
             payload = ciphertext;
         }
 
-        var header = SpillBlockFormat.CreateHeader(payload.Length, plaintext.Length, checksum, nonce, tag, key is not null);
+        var header = SpillBlockFormat.CreateHeader(payload.Length, plaintext.Length, checksum, nonce, tag,
+            _schemaFingerprint, key is not null);
         _session.ReserveDisk(checked(header.Length + payload.Length));
         await _stream.WriteAsync(header, cancellationToken).ConfigureAwait(false);
         await _stream.WriteAsync(payload, cancellationToken).ConfigureAwait(false);

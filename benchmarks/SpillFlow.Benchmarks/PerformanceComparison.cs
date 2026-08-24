@@ -130,6 +130,7 @@ public sealed class AggregateRow
 
 public sealed class BankRowCodec : ISpillCodec<BankRow>
 {
+    public string SchemaId => "spillflow-benchmarks:bank-row:v1";
     public int GetEncodedSize(BankRow value) => 12;
 
     public byte[] Encode(BankRow value)

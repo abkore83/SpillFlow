@@ -5,10 +5,11 @@ namespace SpillFlow;
 internal static class SpillBlockFormat
 {
     public const uint Magic = 0x424C5053; // SPLB
-    public const byte Version = 1;
-    public const int HeaderSize = 48;
+    public const byte Version = 2;
+    public const int HeaderSize = 64;
     public const int NonceSize = 12;
     public const int TagSize = 16;
+    public const int SchemaFingerprintSize = 16;
     public const byte EncryptedFlag = 1;
 
     public static uint ComputeCrc32(ReadOnlySpan<byte> data)
@@ -24,8 +25,10 @@ internal static class SpillBlockFormat
     }
 
     public static byte[] CreateHeader(int payloadLength, int plainLength, uint checksum,
-        ReadOnlySpan<byte> nonce, ReadOnlySpan<byte> tag, bool encrypted)
+        ReadOnlySpan<byte> nonce, ReadOnlySpan<byte> tag, ReadOnlySpan<byte> schemaFingerprint, bool encrypted)
     {
+        if (schemaFingerprint.Length != SchemaFingerprintSize)
+            throw new ArgumentException($"Schema fingerprints must contain {SchemaFingerprintSize} bytes.", nameof(schemaFingerprint));
         var header = new byte[HeaderSize];
         BitConverter.TryWriteBytes(header.AsSpan(0, 4), Magic);
         header[4] = Version;
@@ -35,6 +38,7 @@ internal static class SpillBlockFormat
         BitConverter.TryWriteBytes(header.AsSpan(16, 4), checksum);
         nonce.CopyTo(header.AsSpan(20, NonceSize));
         tag.CopyTo(header.AsSpan(32, TagSize));
+        schemaFingerprint.CopyTo(header.AsSpan(48, SchemaFingerprintSize));
         return header;
     }
 
@@ -52,9 +56,10 @@ internal static class SpillBlockFormat
         if (payloadLength <= 0 || plainLength <= 0 || payloadLength > 512 * 1024 * 1024 || plainLength > 512 * 1024 * 1024)
             throw new InvalidDataException("Invalid SpillFlow block length.");
         return new BlockHeader(payloadLength, plainLength, BitConverter.ToUInt32(header.Slice(16, 4)),
-            flags == EncryptedFlag, header.Slice(20, NonceSize).ToArray(), header.Slice(32, TagSize).ToArray());
+            flags == EncryptedFlag, header.Slice(20, NonceSize).ToArray(), header.Slice(32, TagSize).ToArray(),
+            header.Slice(48, SchemaFingerprintSize).ToArray());
     }
 }
 
 internal sealed record BlockHeader(int PayloadLength, int PlainLength, uint Checksum,
-    bool Encrypted, byte[] Nonce, byte[] Tag);
+    bool Encrypted, byte[] Nonce, byte[] Tag, byte[] SchemaFingerprint);

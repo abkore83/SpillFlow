@@ -13,6 +13,7 @@ internal static class RecordFile
         if (value is long) return 12;
         if (value is Guid) return 20;
         if (session.TryGetCodec<T>(out var codec)) return sizeof(int) + codec!.GetEncodedSize(value);
+        session.GetSchemaFingerprint<T>();
         return sizeof(int) + JsonSerializer.SerializeToUtf8Bytes(value).Length;
     }
 
@@ -21,6 +22,7 @@ internal static class RecordFile
         SpillSession session,
         [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
+        var expectedSchemaFingerprint = session.GetSchemaFingerprint<T>();
         session.ReaderOpened();
         try
         {
@@ -31,6 +33,9 @@ internal static class RecordFile
             {
                 await stream.ReadExactlyAsync(headerBytes, cancellationToken).ConfigureAwait(false);
                 var header = SpillBlockFormat.ParseHeader(headerBytes);
+                if (!CryptographicOperations.FixedTimeEquals(header.SchemaFingerprint, expectedSchemaFingerprint))
+                    throw new InvalidDataException(
+                        $"Spill block schema fingerprint does not match the codec registered for '{typeof(T)}'.");
                 var leaseBytes = checked((long)header.PayloadLength + (header.Encrypted ? header.PlainLength : 0));
                 using var lease = session.AcquireMemoryLease(leaseBytes, $"read block from '{Path.GetFileName(path)}'");
                 var payload = ArrayPool<byte>.Shared.Rent(header.PayloadLength);

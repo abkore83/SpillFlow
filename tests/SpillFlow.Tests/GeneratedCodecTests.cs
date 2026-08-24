@@ -26,6 +26,8 @@ public sealed class GeneratedCodecTests
         Assert.Equal(expected.CorrelationId, actual.CorrelationId);
         Assert.Equal(expected.Name, actual.Name);
         Assert.Null(actual.Note);
+        Assert.Equal(codec.SchemaId, new GeneratedBankRecordSpillCodec().SchemaId);
+        Assert.Contains("GeneratedBankRecord", codec.SchemaId, StringComparison.Ordinal);
     }
 
     [Fact]

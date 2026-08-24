@@ -27,6 +27,8 @@ public sealed class SpillOptions
     public TimeSpan AbandonedSessionAge { get; init; } = TimeSpan.FromHours(24);
     /// <summary>Gets an optional 16, 24, or 32-byte AES-GCM key for temporary blocks.</summary>
     public byte[]? EncryptionKey { get; init; }
+    /// <summary>Gets whether unregistered record types may use the slower JSON fallback.</summary>
+    public bool AllowJsonFallback { get; init; } = true;
 
     internal void Validate()
     {

@@ -10,7 +10,7 @@ SpillFlow is an experimental .NET 8 library for bounded-memory operations over
 ## Install
 
 ```powershell
-dotnet add package SpillFlow --version 0.1.0-alpha.1
+dotnet add package SpillFlow --version 0.2.0-alpha.1
 ```
 
 The package includes the codec source generator; no second analyzer package is
@@ -55,6 +55,21 @@ rejects unsupported property types at compile time. You can instead implement
 `ISpillCodec<T>` manually. `int`, `long`, and `Guid` have built-in fixed-width
 encoding. Without a codec, records use the slower JSON fallback.
 
+Every binary codec declares a stable `SchemaId`. SpillFlow stores a 128-bit
+fingerprint of that identifier in each temporary block and rejects mismatched
+blocks before decoding. A custom codec must change its `SchemaId` whenever its
+binary layout changes.
+
+Production-style callers can require binary codecs and reject the JSON fallback:
+
+```csharp
+await using var strictSession = new SpillSession(new SpillOptions
+{
+    MemoryLimitBytes = 256L * 1024 * 1024,
+    AllowJsonFallback = false
+});
+```
+
 Grouped aggregation retains one accumulator per key instead of materializing
 every member of every group:
 
@@ -84,9 +99,9 @@ when the estimated retained state cannot fit safely inside the session budget.
 This is a correctness-first prototype, not yet a production banking library.
 It now includes recursive partitioning, session memory leases, bounded merge
 fan-in, pooled asynchronous block I/O, disk quotas, abandoned-session cleanup,
-checksummed blocks, optional AES-GCM encryption, source-generated codecs, and
-explicit recovery checkpoints. Remaining production work includes codec/schema
-fingerprints in block headers, automatic operator-level restart orchestration,
+checksummed and schema-fingerprinted blocks, optional AES-GCM encryption,
+source-generated codecs, and explicit recovery checkpoints. Remaining
+production work includes automatic operator-level restart orchestration,
 heavy-key isolation, restricted file permissions, and statistically repeated
 benchmarks on multiple storage devices.
 

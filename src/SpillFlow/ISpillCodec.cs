@@ -4,6 +4,8 @@ namespace SpillFlow;
 /// <typeparam name="T">The value type handled by the codec.</typeparam>
 public interface ISpillCodec<T>
 {
+    /// <summary>Gets a stable identifier that changes whenever the encoded binary schema changes.</summary>
+    string SchemaId { get; }
     /// <summary>Encodes a value.</summary>
     byte[] Encode(T value);
     /// <summary>Decodes one complete encoded value.</summary>
@@ -14,10 +16,15 @@ public interface ISpillCodec<T>
 
 /// <summary>Adapts encode and decode delegates to <see cref="ISpillCodec{T}"/>.</summary>
 /// <typeparam name="T">The value type handled by the delegates.</typeparam>
+/// <param name="schemaId">A stable identifier that changes whenever the encoded binary schema changes.</param>
 /// <param name="encode">Encodes a value.</param>
 /// <param name="decode">Decodes a byte array.</param>
-public sealed class DelegateSpillCodec<T>(Func<T, byte[]> encode, Func<byte[], T> decode) : ISpillCodec<T>
+public sealed class DelegateSpillCodec<T>(string schemaId, Func<T, byte[]> encode, Func<byte[], T> decode) : ISpillCodec<T>
 {
+    /// <inheritdoc />
+    public string SchemaId { get; } = string.IsNullOrWhiteSpace(schemaId)
+        ? throw new ArgumentException("A stable codec schema identifier is required.", nameof(schemaId))
+        : schemaId;
     /// <inheritdoc />
     public byte[] Encode(T value) => encode(value);
     /// <inheritdoc />

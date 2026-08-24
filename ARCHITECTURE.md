@@ -29,7 +29,7 @@ resource-control architecture around that basic idea.
 | Large hash partition | Package behavior | Recursively split until safe or fail clearly |
 | Merge readers | External merge behavior | Configured maximum fan-in per merge pass |
 | Disk limit | No matching public telemetry used in our test | Reserve bytes before writing and enforce a quota |
-| Temporary block checks | Not compared through its public API | Versioned blocks with CRC32 checks |
+| Temporary block checks | Not compared through its public API | Versioned blocks with CRC32 and schema fingerprints |
 | Temporary encryption | Not part of our comparison | Optional caller-keyed AES-GCM |
 | Recovery | Not part of our comparison | Session manifest and caller checkpoints |
 | Encoding | Package implementation | Built-in, custom, generated binary, or JSON fallback codecs |
@@ -127,8 +127,9 @@ diagnostic. JSON remains a convenient but slower fallback.
 ### Block-storage layer
 
 SpillFlow groups many records into one pooled block instead of making one disk
-write for every record. A temporary block contains a versioned header, encoded
-record lengths, record data, a CRC32 checksum, and optional AES-GCM fields.
+write for every record. A temporary block contains a versioned header, a 128-bit
+codec/schema fingerprint, encoded record lengths, record data, a CRC32 checksum,
+and optional AES-GCM fields.
 
 The read path checks lengths, decrypts when enabled, verifies integrity, and
 then decodes records. The session reserves disk space before a physical write.
@@ -337,7 +338,6 @@ SpillFlow is an alpha prototype, not yet a production banking library. Important
 remaining work includes:
 
 - isolate and stream extremely frequent join keys
-- add codec and schema fingerprints to block headers
 - automatically resume complete operator phases
 - strengthen file permissions for each supported platform
 - add stable sorting for equal keys when requested

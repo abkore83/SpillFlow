@@ -1,4 +1,6 @@
 using System.Collections.Concurrent;
+using System.Security.Cryptography;
+using System.Text;
 using System.Text.Json;
 
 namespace SpillFlow;
@@ -197,6 +199,29 @@ public sealed class SpillSession : IAsyncDisposable
         }
         codec = null;
         return false;
+    }
+
+    internal byte[] GetSchemaFingerprint<T>()
+    {
+        string schemaId;
+        if (typeof(T) == typeof(int)) schemaId = "spillflow:primitive:int32-le:v1";
+        else if (typeof(T) == typeof(long)) schemaId = "spillflow:primitive:int64-le:v1";
+        else if (typeof(T) == typeof(Guid)) schemaId = "spillflow:primitive:guid-dotnet:v1";
+        else if (TryGetCodec<T>(out var codec))
+        {
+            schemaId = codec!.SchemaId;
+            if (string.IsNullOrWhiteSpace(schemaId))
+                throw new InvalidOperationException($"The codec for '{typeof(T)}' returned an empty schema identifier.");
+        }
+        else
+        {
+            if (!Options.AllowJsonFallback)
+                throw new InvalidOperationException(
+                    $"No binary spill codec is registered for '{typeof(T)}' and JSON fallback is disabled.");
+            schemaId = $"spillflow:json:{typeof(T).FullName}:v1";
+        }
+
+        return SHA256.HashData(Encoding.UTF8.GetBytes(schemaId))[..SpillBlockFormat.SchemaFingerprintSize];
     }
 
     internal void WroteRecord(long bytes)
