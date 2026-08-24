@@ -2,7 +2,8 @@
 
 SpillFlow is an experimental .NET 8 library for bounded-memory operations over
 `IAsyncEnumerable<T>`. It provides `OrderBySpill`, `DistinctSpill`,
-`ExceptBySpill`, `GroupJoinSpill`, and `GroupAggregateSpill`.
+`ExceptBySpill`, `GroupJoinSpill`, `GroupJoinStreamSpill`, and
+`GroupAggregateSpill`.
 
 > **Alpha:** APIs, generated codec layout, and recovery file formats may change
 > before 1.0. Review [DRAWBACKS.md](DRAWBACKS.md) before production use.
@@ -87,6 +88,31 @@ temporary files when the estimated accumulator state fits within 75 percent of
 the session budget. If the threshold is crossed, it writes the buffered prefix
 to stable hash partitions and continues in bounded-memory mode without reading
 the source a second time.
+
+`GroupJoinSpill` returns each match group as an `IReadOnlyList`, so a single
+group must fit its memory lease. For a key with more matches than RAM, use
+`GroupJoinStreamSpill`. Its result selector consumes an asynchronous match
+stream before returning:
+
+```csharp
+var counts = accounts.GroupJoinStreamSpill(
+    transactions,
+    session,
+    account => account.Id,
+    transaction => transaction.AccountId,
+    async (account, matches, cancellationToken) =>
+    {
+        var count = 0L;
+        await foreach (var transaction in matches.WithCancellation(cancellationToken))
+            count++;
+        return new AccountTransactionCount(account.Id, count);
+    });
+```
+
+When an oversized partition stops shrinking, the streaming operator reads its
+matches directly from disk. This keeps memory bounded. Multiple left records
+for the same oversized key may rescan that disk partition, so callers should
+prefer grouped aggregation when they only need a count, sum, or other summary.
 
 Sorting enforces `MergeFanIn` through bounded multi-pass merging. Hash operators
 use the supplied equality comparer for both equality and partition routing.

@@ -113,6 +113,45 @@ public sealed class SpillExtensionsTests
     }
 
     [Fact]
+    public async Task GroupJoinStreamSpill_processes_a_hot_key_without_materializing_the_group()
+    {
+        await using var session = TinySession().RegisterCodec(new RowCodec());
+        var left = new[] { new Row(7, "left"), new Row(8, "no matches") };
+        var hotPartition = Enumerable.Range(0, 10_000).Select(_ => new Row(7, "right"));
+
+        var result = await CollectAsync(AsAsync(left).GroupJoinStreamSpill(
+            AsAsync(hotPartition), session, row => row.Id, row => row.Id,
+            async (leftItem, matches, cancellationToken) =>
+            {
+                var count = 0;
+                await foreach (var match in matches.WithCancellation(cancellationToken))
+                    count++;
+                return (leftItem.Id, Count: count);
+            }));
+
+        Assert.Equal(new[] { (7, 10_000), (8, 0) }, result.OrderBy(item => item.Id));
+        Assert.True(session.Statistics.PeakLeasedBytes <= session.Options.MemoryLimitBytes * 3 / 4);
+        Assert.True(session.Statistics.UsedDisk);
+    }
+
+    [Fact]
+    public async Task GroupJoinStreamSpill_returns_a_left_value_when_the_right_source_is_empty()
+    {
+        await using var session = TinySession().RegisterCodec(new RowCodec());
+        var result = await CollectAsync(AsAsync(new[] { new Row(8, "left") }).GroupJoinStreamSpill(
+            AsAsync(Array.Empty<Row>()), session, row => row.Id, row => row.Id,
+            async (leftItem, matches, cancellationToken) =>
+            {
+                var count = 0;
+                await foreach (var match in matches.WithCancellation(cancellationToken))
+                    count++;
+                return (leftItem.Id, Count: count);
+            }));
+
+        Assert.Equal((8, 0), Assert.Single(result));
+    }
+
+    [Fact]
     public async Task DistinctSpill_recursively_refines_oversized_partitions()
     {
         await using var session = new SpillSession(new SpillOptions

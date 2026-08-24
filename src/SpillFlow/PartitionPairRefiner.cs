@@ -14,6 +14,7 @@ internal static class PartitionPairRefiner
         string operation,
         bool materializeLeft,
         CancellationToken cancellationToken,
+        bool allowOversizedLeaf = false,
         int depth = 0)
         where TKey : notnull
     {
@@ -21,8 +22,14 @@ internal static class PartitionPairRefiner
         if (session.CanPartitionsFit(checkedPaths))
             return [new PartitionPair(Existing(leftPath), Existing(rightPath))];
 
+        var originalRightLength = rightPath is not null && File.Exists(rightPath)
+            ? new FileInfo(rightPath).Length
+            : 0;
+
         if (depth >= session.Options.MaxPartitionDepth)
         {
+            if (allowOversizedLeaf)
+                return [new PartitionPair(Existing(leftPath), Existing(rightPath))];
             throw new SpillResourceLimitException(
                 $"{operation} cannot split paired partitions enough to fit the memory lease after {depth} " +
                 "refinement levels. Increase MemoryLimitBytes or investigate a hot key.");
@@ -60,8 +67,15 @@ internal static class PartitionPairRefiner
             var right = Existing(rightWriter.Paths[i]);
             if (left is null && right is null)
                 continue;
+            if (allowOversizedLeaf && right is not null && originalRightLength > 0 &&
+                !session.CanPartitionFit(right) && new FileInfo(right).Length >= originalRightLength)
+            {
+                result.Add(new PartitionPair(left, right));
+                continue;
+            }
             var leaves = await RefineAsync<TLeft, TRight, TKey>(left, right, session, leftKeySelector,
-                rightKeySelector, comparer, operation, materializeLeft, cancellationToken, depth + 1)
+                rightKeySelector, comparer, operation, materializeLeft, cancellationToken, allowOversizedLeaf,
+                depth + 1)
                 .ConfigureAwait(false);
             result.AddRange(leaves);
         }

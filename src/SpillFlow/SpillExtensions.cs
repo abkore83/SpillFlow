@@ -197,6 +197,114 @@ public static class SpillExtensions
         }
     }
 
+    /// <summary>
+    /// Correlates left values with a match stream that can remain bounded when one key has more values than RAM.
+    /// The result selector must consume the match stream before returning.
+    /// </summary>
+    public static async IAsyncEnumerable<TResult> GroupJoinStreamSpill<TLeft, TRight, TKey, TResult>(
+        this IAsyncEnumerable<TLeft> leftSource,
+        IAsyncEnumerable<TRight> rightSource,
+        SpillSession session,
+        Func<TLeft, TKey> leftKeySelector,
+        Func<TRight, TKey> rightKeySelector,
+        Func<TLeft, IAsyncEnumerable<TRight>, CancellationToken, ValueTask<TResult>> resultSelector,
+        IEqualityComparer<TKey>? comparer = null,
+        [EnumeratorCancellation] CancellationToken cancellationToken = default)
+        where TKey : notnull
+    {
+        ArgumentNullException.ThrowIfNull(leftSource);
+        ArgumentNullException.ThrowIfNull(rightSource);
+        ArgumentNullException.ThrowIfNull(session);
+        ArgumentNullException.ThrowIfNull(leftKeySelector);
+        ArgumentNullException.ThrowIfNull(rightKeySelector);
+        ArgumentNullException.ThrowIfNull(resultSelector);
+
+        comparer ??= EqualityComparer<TKey>.Default;
+        await using var left = new PartitionWriter<TLeft>(session);
+        await using var right = new PartitionWriter<TRight>(session);
+        await foreach (var item in leftSource.WithCancellation(cancellationToken).ConfigureAwait(false))
+            await left.WriteAsync(StableHash.Partition(leftKeySelector(item), session.Options.PartitionCount, comparer),
+                item, cancellationToken).ConfigureAwait(false);
+        await foreach (var item in rightSource.WithCancellation(cancellationToken).ConfigureAwait(false))
+            await right.WriteAsync(StableHash.Partition(rightKeySelector(item), session.Options.PartitionCount, comparer),
+                item, cancellationToken).ConfigureAwait(false);
+        await left.DisposeAsync().ConfigureAwait(false);
+        await right.DisposeAsync().ConfigureAwait(false);
+
+        for (var i = 0; i < session.Options.PartitionCount; i++)
+        {
+            var leaves = await PartitionPairRefiner.RefineAsync<TLeft, TRight, TKey>(
+                File.Exists(left.Paths[i]) ? left.Paths[i] : null,
+                File.Exists(right.Paths[i]) ? right.Paths[i] : null,
+                session, leftKeySelector, rightKeySelector, comparer, nameof(GroupJoinStreamSpill),
+                materializeLeft: false, cancellationToken, allowOversizedLeaf: true).ConfigureAwait(false);
+
+            foreach (var leaf in leaves)
+            {
+                var materializeRight = leaf.Right is null || session.CanPartitionFit(leaf.Right);
+                Dictionary<TKey, List<TRight>>? lookup = null;
+                using var lease = materializeRight && leaf.Right is not null
+                    ? session.AcquirePartitionLease(leaf.Right, nameof(GroupJoinStreamSpill))
+                    : null;
+                if (materializeRight && leaf.Right is not null)
+                {
+                    lookup = new Dictionary<TKey, List<TRight>>(comparer);
+                    await foreach (var item in RecordFile.ReadAsync<TRight>(leaf.Right, session, cancellationToken)
+                                       .ConfigureAwait(false))
+                    {
+                        var key = rightKeySelector(item);
+                        if (!lookup.TryGetValue(key, out var values))
+                            lookup[key] = values = [];
+                        values.Add(item);
+                    }
+                }
+
+                if (leaf.Left is not null)
+                {
+                    await foreach (var item in RecordFile.ReadAsync<TLeft>(leaf.Left, session, cancellationToken)
+                                       .ConfigureAwait(false))
+                    {
+                        var key = leftKeySelector(item);
+                        IAsyncEnumerable<TRight> matches = materializeRight
+                            ? EnumerateAsync(lookup is not null && lookup.TryGetValue(key, out var values) ? values : [],
+                                cancellationToken)
+                            : ReadMatchesAsync(leaf.Right!, session, key, rightKeySelector, comparer, cancellationToken);
+                        yield return await resultSelector(item, matches, cancellationToken).ConfigureAwait(false);
+                    }
+                }
+
+                if (leaf.Left is not null) session.DeleteFile(leaf.Left);
+                if (leaf.Right is not null) session.DeleteFile(leaf.Right);
+            }
+        }
+    }
+
+    private static async IAsyncEnumerable<T> EnumerateAsync<T>(
+        IEnumerable<T> values,
+        [EnumeratorCancellation] CancellationToken cancellationToken)
+    {
+        foreach (var value in values)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            yield return value;
+        }
+        await Task.CompletedTask;
+    }
+
+    private static async IAsyncEnumerable<TRight> ReadMatchesAsync<TRight, TKey>(
+        string path,
+        SpillSession session,
+        TKey expectedKey,
+        Func<TRight, TKey> keySelector,
+        IEqualityComparer<TKey> comparer,
+        [EnumeratorCancellation] CancellationToken cancellationToken)
+        where TKey : notnull
+    {
+        await foreach (var item in RecordFile.ReadAsync<TRight>(path, session, cancellationToken).ConfigureAwait(false))
+            if (comparer.Equals(expectedKey, keySelector(item)))
+                yield return item;
+    }
+
     /// <summary>Aggregates values by key without materializing every group member at once.</summary>
     public static async IAsyncEnumerable<TResult> GroupAggregateSpill<TSource, TKey, TAccumulator, TResult>(
         this IAsyncEnumerable<TSource> source,

@@ -91,6 +91,7 @@ The operator layer provides:
 - `DistinctSpill`
 - `ExceptBySpill`
 - `GroupJoinSpill`
+- `GroupJoinStreamSpill`
 - `GroupAggregateSpill`
 - `OrderBySpill`
 
@@ -171,7 +172,12 @@ keys reach the same partition, so SpillFlow can build and use a bounded lookup
 for one partition at a time.
 
 A very frequent key can still create a huge group. Hashing cannot split one key
-into smaller keys. Heavy-key streaming is therefore unfinished production work.
+into smaller keys. `GroupJoinSpill` fails safely when its required
+`IReadOnlyList` cannot fit. `GroupJoinStreamSpill` provides the bounded
+alternative: its callback consumes matches through `IAsyncEnumerable`. When a
+partition stops shrinking, SpillFlow streams matching records from disk rather
+than repeating all remaining hash depths. Several left records sharing the same
+oversized key can cause repeated disk scans.
 
 ### Grouped aggregation
 
@@ -341,7 +347,7 @@ their own representative tests before choosing either implementation.
 SpillFlow is an alpha prototype, not yet a production banking library. Important
 remaining work includes:
 
-- isolate and stream extremely frequent join keys
+- reduce repeated disk scans when many left records share one oversized join key
 - automatically resume complete operator phases
 - add stable sorting for equal keys when requested
 - run repeated benchmarks with confidence intervals

@@ -13,6 +13,7 @@
 - Production callers can disable the JSON fallback and require registered binary codecs.
 - Session directories use current-user-only Windows ACLs or owner-only Unix permissions by default.
 - Recovery reapplies private directory permissions before reading preserved data.
+- `GroupJoinStreamSpill` handles unsplittable hot-key groups with a bounded asynchronous match stream.
 - Sessions support atomic typed checkpoints and explicit file recovery.
 
 ## Remaining production work
@@ -20,8 +21,10 @@
 1. Memory leases bound SpillFlow-owned retained state, but cannot measure every
    CLR/runtime allocation or memory used by user callbacks. `MemoryLimitBytes`
    is therefore a library budget, not a hard process-memory guarantee.
-2. A single extremely frequent key cannot be split by hashing. GroupJoin may
-   need a dedicated heavy-key streaming strategy instead of failing safely.
+2. `GroupJoinSpill` requires an `IReadOnlyList` and therefore still rejects a
+   group that cannot fit its memory lease. `GroupJoinStreamSpill` is the bounded
+   alternative, but it may rescan an oversized right partition for each left
+   record sharing that key.
 3. Recovery restores checked files, disk accounting, and caller source state.
    Operators do not yet automatically restart their internal phase from a
    checkpoint; the caller must resume from its saved source cursor.
@@ -41,5 +44,5 @@
 SpillFlow now addresses the original correctness and resource-control blockers,
 and its billion-row Distinct test completes under a 1 GiB managed-memory cap.
 It is still a pre-production library. Before banking deployment, prioritize
-heavy-key handling, operator-managed restart checkpoints, secure-deletion policy,
-and broader soak testing.
+operator-managed restart checkpoints, hot-key performance optimization,
+secure-deletion policy, and broader soak testing.

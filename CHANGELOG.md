@@ -3,6 +3,13 @@
 All notable changes to this project are documented here. SpillFlow follows
 [Semantic Versioning](https://semver.org/) after the `0.x` development series.
 
+## 0.2.0-alpha.3 - 2026-08-24
+
+- Added `GroupJoinStreamSpill`, which gives the result selector an asynchronous match stream instead of a materialized list.
+- Oversized right-side partitions that stop shrinking switch to bounded disk streaming instead of repeating every hash depth.
+- The original `GroupJoinSpill` still fails safely when its required `IReadOnlyList` cannot fit the memory lease.
+- Added hot-key, no-match, and lease-budget tests.
+
 ## 0.2.0-alpha.2 - 2026-08-24
 
 - Creates Windows session directories atomically with a protected current-user-only ACL.
