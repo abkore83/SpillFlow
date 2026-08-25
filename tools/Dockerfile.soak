@@ -1,0 +1,7 @@
+FROM mcr.microsoft.com/dotnet/sdk:8.0
+
+WORKDIR /src
+COPY . .
+RUN dotnet restore SpillFlow.sln
+
+ENTRYPOINT ["bash", "tools/run-spillflow-soak.sh"]

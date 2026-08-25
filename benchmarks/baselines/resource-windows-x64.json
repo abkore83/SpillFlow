@@ -1,0 +1,44 @@
+﻿{
+    "schemaVersion":  1,
+    "platform":  "windows-x64",
+    "inputRecords":  10000000,
+    "spillMemoryMb":  64,
+    "repetitions":  3,
+    "measurements":  {
+                         "orderby":  {
+                                         "wallMilliseconds":  5059.7394,
+                                         "allocatedBytes":  39240776,
+                                         "peakWorkingSetBytes":  76668928,
+                                         "peakLeasedBytes":  1310720,
+                                         "outputSignature":  "10000000:49999995000000"
+                                     },
+                         "groupjoin":  {
+                                           "wallMilliseconds":  6990.1364,
+                                           "allocatedBytes":  1583555480,
+                                           "peakWorkingSetBytes":  99983360,
+                                           "peakLeasedBytes":  16777216,
+                                           "outputSignature":  "10000000:1984998015000000"
+                                       },
+                         "distinct":  {
+                                          "wallMilliseconds":  1494.7431,
+                                          "allocatedBytes":  117977232,
+                                          "peakWorkingSetBytes":  129253376,
+                                          "peakLeasedBytes":  8388608,
+                                          "outputSignature":  "1000000:499999500000"
+                                      },
+                         "exceptby":  {
+                                          "wallMilliseconds":  6034.7233,
+                                          "allocatedBytes":  1142202152,
+                                          "peakWorkingSetBytes":  96391168,
+                                          "peakLeasedBytes":  16777216,
+                                          "outputSignature":  "666666:333332666667"
+                                      },
+                         "aggregate":  {
+                                           "wallMilliseconds":  5715.0797,
+                                           "allocatedBytes":  1153001808,
+                                           "peakWorkingSetBytes":  109842432,
+                                           "peakLeasedBytes":  8388608,
+                                           "outputSignature":  "1000000:5399245260871"
+                                       }
+                     }
+}

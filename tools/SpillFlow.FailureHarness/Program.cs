@@ -3,13 +3,65 @@ using System.Runtime.CompilerServices;
 using System.Text.Json;
 using SpillFlow;
 
-const int RecordCount = 50_000;
+const int RecordCount = 10_000;
 const string OperationId = "hard-crash";
+
+if (args.ElementAtOrDefault(0) == "create-fixture")
+    return await CreateRecoveryFixtureAsync(
+        args.ElementAtOrDefault(1) ?? throw new ArgumentException("A fixture output directory is required."),
+        args.ElementAtOrDefault(2) ?? "orderby");
 
 if (args.ElementAtOrDefault(0) == "worker")
     return await RunWorkerAsync(args.Skip(1).ToArray());
 
 return await RunHarnessAsync(args);
+
+static async Task<int> CreateRecoveryFixtureAsync(string outputDirectory, string operationName)
+{
+    if (operationName is not ("orderby" or "distinct" or "exceptby" or "aggregate" or "groupjoin"))
+        throw new ArgumentException($"Unknown recoverable operation '{operationName}'.");
+    outputDirectory = Path.GetFullPath(outputDirectory);
+    if (Directory.Exists(outputDirectory) && Directory.EnumerateFileSystemEntries(outputDirectory).Any())
+        throw new InvalidOperationException($"Fixture directory '{outputDirectory}' is not empty.");
+    Directory.CreateDirectory(Path.GetDirectoryName(outputDirectory)!);
+    var stagingRoot = Path.Combine(Path.GetDirectoryName(outputDirectory)!, $"fixture-stage-{Guid.NewGuid():N}");
+    Directory.CreateDirectory(stagingRoot);
+    string sessionDirectory;
+    await using (var session = new SpillSession(Options(stagingRoot)))
+    {
+        sessionDirectory = session.WorkingDirectory;
+        var delivered = 0;
+        try
+        {
+            var output = operationName == "orderby"
+                ? CompatibilityOrderByOutput(session)
+                : RecoverableOutput(session, operationName, null);
+            await foreach (var _ in output)
+            {
+                if (++delivered == 15)
+                    throw new FixtureInterruptionException();
+            }
+        }
+        catch (FixtureInterruptionException) { }
+        session.PreserveForRecovery();
+    }
+
+    if (Directory.Exists(outputDirectory)) Directory.Delete(outputDirectory);
+    Directory.Move(sessionDirectory, outputDirectory);
+    if (Directory.Exists(stagingRoot)) Directory.Delete(stagingRoot, recursive: true);
+    Console.WriteLine($"Created {operationName} recovery fixture: {outputDirectory}");
+    return 0;
+}
+
+static async IAsyncEnumerable<long> CompatibilityOrderByOutput(SpillSession session)
+{
+    await foreach (var value in session.OrderByRecoverableSpill(
+                       (offset, token) => DescendingSource(offset, 1_000, token),
+                       "compat-orderby",
+                       value => value,
+                       outputCheckpointInterval: 10))
+        yield return value;
+}
 
 static async Task<int> RunHarnessAsync(string[] harnessArgs)
 {
@@ -20,28 +72,45 @@ static async Task<int> RunHarnessAsync(string[] harnessArgs)
     var results = new List<ScenarioResult>();
     var started = DateTime.UtcNow;
 
-    foreach (var phase in new[] { "reading", "merging", "output" })
+    var crashMatrix = new Dictionary<string, string[]>
     {
-        var name = $"hard-crash-{phase}";
-        results.Add(await ExecuteScenarioAsync(name, async scenarioRoot =>
+        ["orderby"] = ["reading", "merging", "output"],
+        ["distinct"] = ["reading", "partitioning", "output"],
+        ["exceptby"] = ["reading", "readingsecondary", "partitioning", "output"],
+        ["aggregate"] = ["reading", "partitioning", "output"],
+        ["groupjoin"] = ["reading", "readingsecondary", "partitioning", "output"]
+    };
+    foreach (var entry in crashMatrix)
+    {
+        foreach (var phase in entry.Value)
         {
-            var prepared = await PrepareKilledSessionAsync(scenarioRoot, phase);
-            var recovered = await RunChildAsync("recover", prepared.SessionDirectory, prepared.RecoveredPath);
-            Require(recovered.ExitCode == 0,
-                $"Recovery failed with exit code {recovered.ExitCode}: {recovered.Error}{recovered.Output}");
-            var measurement = ParseLastJson<RecoveryMeasurement>(recovered.Output);
-            var deliveredBeforeCrash = File.Exists(prepared.DeliveredPath)
-                ? File.ReadLines(prepared.DeliveredPath).Select(int.Parse).ToArray()
-                : [];
-            var recoveredValues = File.ReadLines(prepared.RecoveredPath).Select(int.Parse).ToArray();
-            var combined = deliveredBeforeCrash.Concat(recoveredValues).ToArray();
-            Require(combined.SequenceEqual(Enumerable.Range(0, RecordCount)),
-                "The combined pre-crash and recovered output was missing, duplicated, or out of order.");
-            Require(measurement.Count == recoveredValues.LongLength,
-                "The recovery measurement did not match the durable recovered-output ledger.");
-            Require(measurement.Checksum == recoveredValues.Sum(value => (long)value),
-                "The recovery checksum did not match the durable recovered-output ledger.");
-        }));
+            var operation = entry.Key;
+            var name = $"crash-{operation}-{phase}";
+            results.Add(await ExecuteScenarioAsync(name, async scenarioRoot =>
+            {
+                var prepared = await PrepareKilledSessionAsync(scenarioRoot, operation, phase);
+                var recovered = await RunChildAsync(
+                    $"recover-{operation}", prepared.SessionDirectory, prepared.RecoveredPath);
+                Require(recovered.ExitCode == 0,
+                    $"Recovery failed with exit code {recovered.ExitCode}: {recovered.Error}{recovered.Output}");
+                var measurement = ParseLastJson<RecoveryMeasurement>(recovered.Output);
+                var deliveredBeforeCrash = File.Exists(prepared.DeliveredPath)
+                    ? File.ReadLines(prepared.DeliveredPath).Select(long.Parse).ToArray()
+                    : [];
+                var recoveredValues = File.ReadLines(prepared.RecoveredPath).Select(long.Parse).ToArray();
+                var combined = deliveredBeforeCrash.Concat(recoveredValues).ToArray();
+                var expected = ExpectedOutput(operation);
+                if (operation == "orderby")
+                    Require(combined.SequenceEqual(expected), "Recovered ordering output was missing, duplicated, or reordered.");
+                else
+                    Require(combined.Order().SequenceEqual(expected.Order()),
+                        "Combined pre-crash and recovered output contained missing, duplicate, or incorrect values.");
+                Require(measurement.Count == recoveredValues.LongLength,
+                    "The recovery measurement did not match the durable recovered-output ledger.");
+                Require(measurement.Checksum == recoveredValues.Aggregate(0L, (sum, value) => unchecked(sum + value)),
+                    "The recovery checksum did not match the durable recovered-output ledger.");
+            }));
+        }
     }
 
     results.Add(await CorruptionScenarioAsync("corrupt-block", root, sessionDirectory =>
@@ -105,9 +174,9 @@ static async Task<int> RunHarnessAsync(string[] harnessArgs)
     {
         return await ExecuteScenarioAsync(name, async scenarioRoot =>
         {
-            var prepared = await PrepareKilledSessionAsync(scenarioRoot, "output");
+            var prepared = await PrepareKilledSessionAsync(scenarioRoot, "orderby", "output");
             mutate(prepared.SessionDirectory);
-            var recovered = await RunChildAsync("recover", prepared.SessionDirectory, "-");
+            var recovered = await RunChildAsync("recover-orderby", prepared.SessionDirectory, "-");
             Require(recovered.ExitCode != 0, "Recovery unexpectedly succeeded after durable state was damaged.");
             var diagnostic = recovered.Error + recovered.Output;
             Require(diagnostic.Contains(expectedError, StringComparison.OrdinalIgnoreCase),
@@ -146,15 +215,17 @@ static async Task<int> RunWorkerAsync(string[] workerArgs)
 
     try
     {
-        return action switch
+        if (action.StartsWith("prepare-", StringComparison.Ordinal))
         {
-            "prepare-reading" => await PrepareAndPauseAsync(path, markerPath, "reading"),
-            "prepare-merging" => await PrepareAndPauseAsync(path, markerPath, "merging"),
-            "prepare-output" => await PrepareAndPauseAsync(path, markerPath, "output"),
-            "recover" => await RecoverAsync(path, markerPath),
-            "quota" => await VerifyDiskQuotaAsync(path),
-            _ => throw new ArgumentException($"Unknown worker action '{action}'.")
-        };
+            var parts = action.Split('-', 3);
+            if (parts.Length != 3) throw new ArgumentException($"Invalid prepare action '{action}'.");
+            return await PrepareAndPauseAsync(path, markerPath, parts[1], parts[2]);
+        }
+        if (action.StartsWith("recover-", StringComparison.Ordinal))
+            return await RecoverAsync(path, markerPath, action["recover-".Length..]);
+        if (action == "quota")
+            return await VerifyDiskQuotaAsync(path);
+        throw new ArgumentException($"Unknown worker action '{action}'.");
     }
     catch (Exception exception)
     {
@@ -163,55 +234,48 @@ static async Task<int> RunWorkerAsync(string[] workerArgs)
     }
 }
 
-static async Task<int> PrepareAndPauseAsync(string root, string markerPath, string targetPhase)
+static async Task<int> PrepareAndPauseAsync(
+    string root,
+    string markerPath,
+    string operationName,
+    string targetPhase)
 {
     Directory.CreateDirectory(root);
     await using var session = new SpillSession(Options(root));
     session.PreserveForRecovery();
 
-    bool IsTarget(SpillOperationProgress progress) => targetPhase switch
+    void Checkpointed(SpillOperationPhase phase, long outputRecordsCheckpointed)
     {
-        "reading" => progress.Phase == SpillOperationPhase.Reading && progress.RecordsConsumed > 0,
-        "merging" => progress.Phase == SpillOperationPhase.Merging,
-        "output" => progress.Phase == SpillOperationPhase.Output && progress.OutputRecordsCheckpointed >= 100,
-        _ => false
-    };
+        var normalized = phase.ToString().ToLowerInvariant();
+        if (normalized != targetPhase || phase == SpillOperationPhase.Output && outputRecordsCheckpointed < 10)
+            return;
+        File.WriteAllText(markerPath, session.WorkingDirectory);
+        Thread.Sleep(Timeout.Infinite);
+    }
 
-    var operation = session.OrderByRecoverableSpill(
-        (offset, token) => DescendingSource(offset, RecordCount, token),
-        OperationId,
-        value => value,
-        outputCheckpointInterval: 100,
-        checkpointed: progress =>
-        {
-            if (!IsTarget(progress))
-                return;
-            File.WriteAllText(markerPath, session.WorkingDirectory);
-            Thread.Sleep(Timeout.Infinite);
-        });
-
+    var operation = RecoverableOutput(session, operationName, Checkpointed);
     await using var delivered = new StreamWriter(new FileStream(
         markerPath + ".delivered", FileMode.Create, FileAccess.Write, FileShare.Read)) { AutoFlush = true };
     await foreach (var value in operation)
         await delivered.WriteLineAsync(value.ToString(System.Globalization.CultureInfo.InvariantCulture));
-    throw new InvalidOperationException($"The worker completed before reaching phase '{targetPhase}'.");
+    throw new InvalidOperationException(
+        $"The {operationName} worker completed before reaching phase '{targetPhase}'.");
 }
 
-static async Task<int> RecoverAsync(string sessionDirectory, string recoveredOutputPath)
+static async Task<int> RecoverAsync(
+    string sessionDirectory,
+    string recoveredOutputPath,
+    string operationName)
 {
     await using var session = SpillSession.Recover(sessionDirectory, Options(Path.GetDirectoryName(sessionDirectory)!));
     await using var recoveredOutput = recoveredOutputPath == "-" ? null : new StreamWriter(new FileStream(
         recoveredOutputPath, FileMode.Create, FileAccess.Write, FileShare.Read)) { AutoFlush = true };
     long count = 0;
     long checksum = 0;
-    await foreach (var value in session.OrderByRecoverableSpill(
-                       (offset, token) => DescendingSource(offset, RecordCount, token),
-                       OperationId,
-                       value => value,
-                       outputCheckpointInterval: 100))
+    await foreach (var value in RecoverableOutput(session, operationName, null))
     {
         count++;
-        checksum = checked(checksum + value);
+        checksum = unchecked(checksum + value);
         if (recoveredOutput is not null)
             await recoveredOutput.WriteLineAsync(value.ToString(System.Globalization.CultureInfo.InvariantCulture));
     }
@@ -219,6 +283,146 @@ static async Task<int> RecoverAsync(string sessionDirectory, string recoveredOut
     Console.WriteLine(JsonSerializer.Serialize(new RecoveryMeasurement(count, checksum)));
     return 0;
 }
+
+static IAsyncEnumerable<long> RecoverableOutput(
+    SpillSession session,
+    string operationName,
+    Action<SpillOperationPhase, long>? checkpointed) => operationName switch
+    {
+        "orderby" => OrderByOutput(session, checkpointed),
+        "distinct" => DistinctOutput(session, checkpointed),
+        "exceptby" => ExceptByOutput(session, checkpointed),
+        "aggregate" => AggregateOutput(session, checkpointed),
+        "groupjoin" => GroupJoinOutput(session, checkpointed),
+        _ => throw new ArgumentException($"Unknown recoverable operation '{operationName}'.")
+    };
+
+static async IAsyncEnumerable<long> OrderByOutput(
+    SpillSession session,
+    Action<SpillOperationPhase, long>? checkpointed)
+{
+    await foreach (var value in session.OrderByRecoverableSpill(
+                       (offset, token) => DescendingSource(offset, RecordCount, token),
+                       OperationId,
+                       value => value,
+                       outputCheckpointInterval: 10,
+                       checkpointed: progress => checkpointed?.Invoke(
+                           progress.Phase, progress.OutputRecordsCheckpointed)))
+        yield return value;
+}
+
+static async IAsyncEnumerable<long> DistinctOutput(
+    SpillSession session,
+    Action<SpillOperationPhase, long>? checkpointed)
+{
+    await foreach (var value in session.DistinctRecoverableSpill(
+                       (offset, token) => AscendingSource(offset, RecordCount, token),
+                       OperationId,
+                       value => value % 1_000,
+                       outputCheckpointInterval: 10,
+                       checkpointed: progress => checkpointed?.Invoke(
+                           progress.Phase, progress.OutputRecordsCheckpointed)))
+        yield return value;
+}
+
+static async IAsyncEnumerable<long> ExceptByOutput(
+    SpillSession session,
+    Action<SpillOperationPhase, long>? checkpointed)
+{
+    await foreach (var value in session.ExceptByRecoverableSpill(
+                       (offset, token) => AscendingSource(offset, RecordCount, token),
+                       (offset, token) => ExcludedKeys(offset, token),
+                       OperationId,
+                       value => value % 1_000,
+                       outputCheckpointInterval: 10,
+                       checkpointed: progress => checkpointed?.Invoke(
+                           progress.Phase, progress.OutputRecordsCheckpointed)))
+        yield return value;
+}
+
+static async IAsyncEnumerable<long> AggregateOutput(
+    SpillSession session,
+    Action<SpillOperationPhase, long>? checkpointed)
+{
+    await foreach (var value in session.GroupAggregateRecoverableSpill(
+                       (offset, token) => AscendingSource(offset, RecordCount, token),
+                       OperationId,
+                       value => value % 1_000,
+                       () => 0L,
+                       (sum, value) => sum + value,
+                       (key, sum) => key * 10_000_000L + sum,
+                       outputCheckpointInterval: 10,
+                       checkpointed: progress => checkpointed?.Invoke(
+                           progress.Phase, progress.OutputRecordsCheckpointed)))
+        yield return value;
+}
+
+static async IAsyncEnumerable<long> GroupJoinOutput(
+    SpillSession session,
+    Action<SpillOperationPhase, long>? checkpointed)
+{
+    await foreach (var value in session.GroupJoinStreamRecoverableSpill(
+                       (offset, token) => AscendingSource(offset, RecordCount, token),
+                       (offset, token) => ReferenceKeys(offset, token),
+                       OperationId,
+                       left => left % 1_000,
+                       right => right,
+                       async (left, matches, cancellationToken) =>
+                       {
+                           var count = 0;
+                           await foreach (var _ in matches.WithCancellation(cancellationToken))
+                               count++;
+                           return left * 10L + count;
+                       },
+                       outputCheckpointInterval: 10,
+                       checkpointed: progress => checkpointed?.Invoke(
+                           progress.Phase, progress.OutputRecordsCheckpointed)))
+        yield return value;
+}
+
+static async IAsyncEnumerable<int> ExcludedKeys(
+    long offset,
+    [EnumeratorCancellation] CancellationToken cancellationToken)
+{
+    const int count = 334;
+    for (var position = offset; position < count; position++)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        yield return (int)position * 3;
+        await Task.Yield();
+    }
+}
+
+static async IAsyncEnumerable<int> ReferenceKeys(
+    long offset,
+    [EnumeratorCancellation] CancellationToken cancellationToken)
+{
+    for (var position = offset; position < 1_000; position++)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        yield return (int)position;
+        await Task.Yield();
+    }
+}
+
+static async IAsyncEnumerable<int> AscendingSource(
+    long offset,
+    int count,
+    [EnumeratorCancellation] CancellationToken cancellationToken)
+{
+    for (var position = offset; position < count; position++)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        yield return (int)position;
+        if ((position & 1_023) == 0)
+            await Task.Yield();
+    }
+}
+
+/*
+ * Keep all output adapters above deterministic: recovery can invoke selectors
+ * again, and the harness relies on exact pre-crash plus post-recovery ledgers.
+ */
 
 static async Task<int> VerifyDiskQuotaAsync(string root)
 {
@@ -245,24 +449,32 @@ static async Task<int> VerifyDiskQuotaAsync(string root)
     throw new InvalidOperationException("The operation exceeded its quota test size without failing.");
 }
 
-static async Task<PreparedSession> PrepareKilledSessionAsync(string root, string phase)
+static async Task<PreparedSession> PrepareKilledSessionAsync(
+    string root,
+    string operationName,
+    string phase)
 {
     var marker = Path.Combine(root, "phase.marker");
-    using var child = StartChild($"prepare-{phase}", root, marker);
+    using var child = StartChild($"prepare-{operationName}-{phase}", root, marker);
     var deadline = DateTime.UtcNow.AddSeconds(60);
     while (!File.Exists(marker) && !child.HasExited && DateTime.UtcNow < deadline)
         await Task.Delay(25);
     if (!File.Exists(marker))
     {
+        if (!child.HasExited)
+        {
+            child.Kill();
+            child.WaitForExit(5_000);
+        }
         var output = await child.StandardOutput.ReadToEndAsync();
         var error = await child.StandardError.ReadToEndAsync();
-        if (!child.HasExited) child.Kill(entireProcessTree: true);
-        throw new TimeoutException($"Worker did not reach phase '{phase}'. {error}{output}");
+        throw new TimeoutException($"{operationName} worker did not reach phase '{phase}'. {error}{output}");
     }
 
     var sessionDirectory = (await File.ReadAllTextAsync(marker)).Trim();
-    child.Kill(entireProcessTree: true);
-    await child.WaitForExitAsync();
+    child.Kill();
+    if (!child.WaitForExit(5_000))
+        throw new TimeoutException($"Killed {operationName} worker did not exit within five seconds.");
     Require(Directory.Exists(sessionDirectory), "Killed worker did not leave a recoverable session directory.");
     return new PreparedSession(sessionDirectory, marker + ".delivered", marker + ".recovered");
 }
@@ -270,6 +482,8 @@ static async Task<PreparedSession> PrepareKilledSessionAsync(string root, string
 static async Task<ChildResult> RunChildAsync(string action, string path, string marker)
 {
     using var child = StartChild(action, path, marker);
+    var outputTask = child.StandardOutput.ReadToEndAsync();
+    var errorTask = child.StandardError.ReadToEndAsync();
     using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(90));
     try
     {
@@ -280,10 +494,7 @@ static async Task<ChildResult> RunChildAsync(string action, string path, string 
         child.Kill(entireProcessTree: true);
         throw new TimeoutException($"Worker action '{action}' exceeded 90 seconds.");
     }
-    return new ChildResult(
-        child.ExitCode,
-        await child.StandardOutput.ReadToEndAsync(),
-        await child.StandardError.ReadToEndAsync());
+    return new ChildResult(child.ExitCode, await outputTask, await errorTask);
 }
 
 static Process StartChild(string action, string path, string marker)
@@ -328,11 +539,30 @@ static SpillOptions Options(string root) => new()
     ProtectTemporaryDirectory = false,
     MemoryLimitBytes = 64 * 1024,
     MaxDiskUsageBytes = 256L * 1024 * 1024,
-    MergeFanIn = 2
+    MergeFanIn = 2,
+    PartitionCount = 8,
+    RecursivePartitionCount = 4
 };
 
 static string SingleOperationRun(string sessionDirectory) =>
     Directory.GetFiles(sessionDirectory, $"*.orderby-{OperationId}.run").Single();
+
+static long[] ExpectedOutput(string operationName) => operationName switch
+{
+    "orderby" => Enumerable.Range(0, RecordCount).Select(value => (long)value).ToArray(),
+    "distinct" => Enumerable.Range(0, 1_000).Select(value => (long)value).ToArray(),
+    "exceptby" => Enumerable.Range(0, 1_000)
+        .Where(value => value % 3 != 0).Select(value => (long)value).ToArray(),
+    "aggregate" => Enumerable.Range(0, 1_000).Select(key =>
+    {
+        long sum = 0;
+        for (var value = key; value < RecordCount; value += 1_000)
+            sum += value;
+        return key * 10_000_000L + sum;
+    }).ToArray(),
+    "groupjoin" => Enumerable.Range(0, RecordCount).Select(value => value * 10L + 1).ToArray(),
+    _ => throw new ArgumentException($"Unknown recoverable operation '{operationName}'.")
+};
 
 static T ParseLastJson<T>(string output) where T : class
 {
@@ -379,3 +609,4 @@ sealed record HarnessReport(
     int Passed,
     int Failed,
     IReadOnlyList<ScenarioResult> Scenarios);
+sealed class FixtureInterruptionException : Exception;

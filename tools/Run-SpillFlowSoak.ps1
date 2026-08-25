@@ -12,6 +12,9 @@ param(
     [ValidateRange(0, 1000000)]
     [int]$MaxIterations = 0,
 
+    [ValidateRange(1, 1440)]
+    [int]$MaxOperationMinutes = 15,
+
     [ValidateNotNullOrEmpty()]
     [string[]]$Operations = @('distinct', 'orderby', 'exceptby', 'groupjoin', 'aggregate'),
 
@@ -38,6 +41,22 @@ foreach ($operation in $Operations) {
 }
 
 New-Item -ItemType Directory -Force -Path $outputDirectory | Out-Null
+$sleepBlockEnabled = $false
+
+if ($env:OS -eq 'Windows_NT') {
+    Add-Type @'
+using System;
+using System.Runtime.InteropServices;
+public static class SpillFlowPowerRequest
+{
+    [DllImport("kernel32.dll")]
+    public static extern uint SetThreadExecutionState(uint flags);
+}
+'@
+    # ES_CONTINUOUS | ES_SYSTEM_REQUIRED. This prevents system sleep but does not force the display to stay on.
+    $sleepBlockEnabled = [SpillFlowPowerRequest]::SetThreadExecutionState(2147483649) -ne 0
+    if (-not $sleepBlockEnabled) { throw 'Windows refused the system-sleep prevention request.' }
+}
 
 function Get-Percentile([double[]]$Values, [double]$Percentile) {
     if ($Values.Count -eq 0) { return 0 }
@@ -93,7 +112,7 @@ function Write-Summary([System.Collections.Generic.List[object]]$Measurements, [
 
 try {
     Write-Host "Building resource benchmark in Release mode..."
-    & dotnet build $benchmarkProject -c Release --no-restore --nologo
+    & dotnet build $benchmarkProject -c Release --no-restore --nologo -p:NoWarn=NU1900
     if ($LASTEXITCODE -ne 0) { throw "Benchmark build failed with exit code $LASTEXITCODE." }
 
     # Limit the managed heap to 1 GiB. The SpillFlow session itself remains at SpillMemoryMb.
@@ -120,6 +139,10 @@ try {
             $jsonLine = $output | Where-Object { $_ -match '^\s*\{' } | Select-Object -Last 1
             if (-not $jsonLine) { throw "Operation '$operation' did not produce a JSON measurement." }
             $measurement = $jsonLine | ConvertFrom-Json
+            if ($measurement.WallMilliseconds -gt $MaxOperationMinutes * 60 * 1000) {
+                throw "Operation '$operation' took more than $MaxOperationMinutes minutes. " +
+                    "The machine may have slept or paused, so this is not a valid uninterrupted soak run."
+            }
             $measurement | Add-Member -NotePropertyName RunStartedUtc -NotePropertyValue $runStartedUtc.ToString('o')
             $measurement | Add-Member -NotePropertyName Iteration -NotePropertyValue ($iteration + 1)
 
@@ -146,9 +169,11 @@ try {
 
     $finalState = if (Test-Path -LiteralPath $stopPath) { 'stopped' } else { 'completed' }
     Write-Summary $measurements $finalState
+    if ($sleepBlockEnabled) { [void][SpillFlowPowerRequest]::SetThreadExecutionState(2147483648) }
     Write-Host "Soak test $finalState. Summary: $summaryPath"
 }
 catch {
+    if ($sleepBlockEnabled) { [void][SpillFlowPowerRequest]::SetThreadExecutionState(2147483648) }
     $_ | Out-String | Set-Content -LiteralPath $failurePath -Encoding utf8
     if ($null -ne $measurements) { Write-Summary $measurements 'failed' }
     Write-Error "Soak test failed. Details: $failurePath`n$_"
