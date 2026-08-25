@@ -57,6 +57,20 @@
    but needs repeated trials, percentiles, cold/warm cache separation, skewed
    datasets, and multiple SSD/HDD environments.
 
+## Failure qualification completed
+
+The local `SpillFlow.FailureHarness` now performs real child-process kills at
+recoverable OrderBy reading, merging, and output checkpoints. It verifies the
+exact combined output sequence across restart. It also proves that block
+tampering, a missing run, a one-byte checkpoint, malformed manifest JSON, and
+disk-quota exhaustion fail closed. The harness is deterministic and requires no
+hosted service.
+
+This is representative evidence, not complete production certification. The
+same hard-kill matrix still needs to cover every recoverable hash and join
+operator, recovery fixtures must be tested across released package versions,
+and storage/device-specific failures still need qualification.
+
 ## Readiness conclusion
 
 SpillFlow now addresses the original correctness and resource-control blockers,

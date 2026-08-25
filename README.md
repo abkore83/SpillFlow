@@ -254,6 +254,22 @@ Remaining work includes secure-deletion policy and statistically repeated
 benchmarks on multiple storage devices. Transactional output integration is
 available when the destination implements `ISpillTransactionalSink<T>`.
 
+### Local failure qualification
+
+The failure harness uses child processes and generated integer records. It does
+not call a hosted service or require a paid dataset:
+
+```powershell
+dotnet build tools/SpillFlow.FailureHarness -c Release --no-restore
+dotnet run -c Release --no-build --project tools/SpillFlow.FailureHarness
+```
+
+It hard-kills recoverable ordering during reading, merging, and output, then
+verifies the exact combined sequence after restart. It also requires fail-closed
+behavior for a corrupted block, missing run, truncated checkpoint, malformed
+manifest, and disk-quota exhaustion. A timestamped JSON evidence report is
+written under `artifacts/failure-harness`.
+
 ## Security
 
 Temporary blocks can be protected with a caller-managed AES-GCM key by setting

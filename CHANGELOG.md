@@ -10,6 +10,7 @@ All notable changes to this project are documented here. SpillFlow follows
 - Requires the destination to atomically commit its business write and unique acknowledgement.
 - Suppresses duplicate effects when recovery replays output or a commit response is lost.
 - Added failure-injection coverage using a preserved and recovered external-ordering session.
+- Added a free local child-process harness for hard crashes, damaged durable state, and disk-quota failure.
 
 ## 0.3.0-alpha.7 - 2026-08-24
 
