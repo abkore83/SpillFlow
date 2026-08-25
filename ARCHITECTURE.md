@@ -308,9 +308,17 @@ references it, and only then deletes superseded inputs. A crash therefore
 leaves either the old graph or the new graph recoverable.
 
 During output, the operator checkpoints every configured number of records.
-Recovery skips the acknowledged prefix and replays any later records. This is
-an at-least-once boundary because SpillFlow cannot atomically commit an external
-consumer's side effect. Other hash operators continue to use caller checkpoints.
+Recovery skips the checkpointed prefix and replays any later records. The raw
+enumerable therefore has an at-least-once boundary.
+
+`ProcessTransactionallyAsync` closes the duplicate-effect gap for one
+transactional destination. The caller derives a stable `SpillDeliveryId` for
+each logical output. `ISpillTransactionalSink<T>` checks that identifier and
+atomically commits both the business effect and its acknowledgement under a
+unique destination constraint. If the commit response is lost, recovery can
+replay the record, but the sink observes the acknowledgement and does not apply
+the effect again. The destination acknowledgement is authoritative; SpillFlow
+does not claim a distributed transaction across independent systems.
 
 `DistinctRecoverableSpill` extends this model to the first hash operator. It
 writes memory-sized input chunks and saves the source offset only after each

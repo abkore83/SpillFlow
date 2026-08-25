@@ -3,6 +3,14 @@
 All notable changes to this project are documented here. SpillFlow follows
 [Semantic Versioning](https://semver.org/) after the `0.x` development series.
 
+## 0.3.0-alpha.8 - 2026-08-24
+
+- Added stable `SpillDeliveryId` values and `ISpillTransactionalSink<T>`.
+- Added `ProcessTransactionallyAsync` for all async outputs, including every recoverable SpillFlow operator.
+- Requires the destination to atomically commit its business write and unique acknowledgement.
+- Suppresses duplicate effects when recovery replays output or a commit response is lost.
+- Added failure-injection coverage using a preserved and recovered external-ordering session.
+
 ## 0.3.0-alpha.7 - 2026-08-24
 
 - Added bounded batching for oversized streaming-join partitions.

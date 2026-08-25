@@ -40,8 +40,12 @@
 3. Operator-managed phase recovery covers ordering, distinct, ExceptBy, grouped
    aggregation, and streaming joins. The materialized-list join still relies on
    caller checkpoints; recoverable callers can use the streaming form instead.
-   Input factories must reopen at durable record offsets. Output is at-least-once,
-   and recovery must use equivalent deterministic callback and comparer behavior.
+   Input factories must reopen at durable record offsets. Raw enumerable output
+   is at-least-once, and recovery must use equivalent deterministic callback and
+   comparer behavior. `ProcessTransactionallyAsync` provides exactly-once effects
+   only when one destination atomically saves the business write and stable,
+   unique delivery acknowledgement. It is not a distributed transaction across
+   independent databases or nontransactional APIs.
 4. SpillFlow deletes temporary files normally, but cannot guarantee physical
    secure deletion on SSDs, copy-on-write filesystems, snapshots, or backups.
 5. Hash-based operators such as `DistinctSpill`, `ExceptBySpill`, and the join
@@ -58,5 +62,5 @@
 SpillFlow now addresses the original correctness and resource-control blockers,
 and its billion-row Distinct test completes under a 1 GiB managed-memory cap.
 It is still a pre-production library. Before banking deployment, prioritize a
-secure-deletion policy, transactional or idempotent output integration, and
-broader repeated soak and storage testing.
+secure-deletion policy, production sink adapters, and broader repeated soak and
+storage testing.

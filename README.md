@@ -13,7 +13,7 @@ SpillFlow is an experimental .NET 8 library for bounded-memory operations over
 ## Install
 
 ```powershell
-dotnet add package SpillFlow --version 0.3.0-alpha.7
+dotnet add package SpillFlow --version 0.3.0-alpha.8
 ```
 
 The package includes the codec source generator; no second analyzer package is
@@ -156,8 +156,31 @@ After an interruption, reopen the preserved directory with
 `SpillSession.Recover` and call the same operation ID. Reading resumes at the
 last durable run boundary, and merging resumes from the last durable run graph.
 Output is at-least-once: after a crash, up to `outputCheckpointInterval` records
-may be replayed. Applications needing exactly-once effects must make their sink
-and SpillFlow checkpoint part of an external transactional or idempotent design.
+may be replayed. Use `ProcessTransactionallyAsync` when the destination can save
+the business change and a unique delivery acknowledgement in one transaction:
+
+```csharp
+await session.OrderByRecoverableSpill(
+        (offset, token) => ReadTransactionsFromOffset(offset, token),
+        operationId: "daily-transactions",
+        keySelector: transaction => transaction.Timestamp,
+        cancellationToken: cancellationToken)
+    .ProcessTransactionallyAsync(
+        operationId: "post-daily-transactions",
+        deliveryKeySelector: transaction => transaction.Id.ToString(),
+        sink: sqlTransactionSink,
+        cancellationToken: cancellationToken);
+```
+
+`ISpillTransactionalSink<T>` has two operations. `IsAcknowledgedAsync` checks a
+durable acknowledgement table. `CommitAndAcknowledgeAsync` must write the output
+and insert its `(OperationId, DeliveryKey)` acknowledgement under a unique
+constraint in the same database transaction. A lost response can cause
+SpillFlow to ask again, but the committed acknowledgement makes the retry a
+no-op. The delivery key must be unique for one logical output and stable across
+restarts; a database primary key or ledger transaction ID is a good choice.
+This gives exactly-once effects at that transactional destination. It cannot
+atomically cover two independent databases or a nontransactional external API.
 
 Recoverable distinct processing uses the same offset-aware source contract:
 
@@ -228,7 +251,8 @@ distinct, ExceptBy, grouped aggregation, and streaming joins, plus optional
 process private-memory monitoring. The materialized-list join remains available
 for groups that fit RAM; recoverable workloads should use the streaming join.
 Remaining work includes secure-deletion policy and statistically repeated
-benchmarks on multiple storage devices.
+benchmarks on multiple storage devices. Transactional output integration is
+available when the destination implements `ISpillTransactionalSink<T>`.
 
 ## Security
 
