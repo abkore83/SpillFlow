@@ -105,3 +105,27 @@ dotnet run -c Release --project benchmarks/SpillFlow.ResourceBenchmarks -- spill
 
 These are single-run measurements, not confidence intervals. Storage hardware,
 filesystem cache, JIT state, antivirus, and background load affect results.
+
+## Six-hour soak test
+
+The soak runner repeatedly exercises Distinct, OrderBy, ExceptBy, GroupJoin,
+and GroupAggregate in fresh processes. It rejects output-count or checksum drift
+and records raw measurements, CSV data, p50/p95 wall time, throughput, peak
+memory, peak temporary disk, allocations, and Gen2 collections.
+
+Run a one-cycle validation first:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File tools/Run-SpillFlowSoak.ps1 -MaxIterations 1 -InputRecords 1000000
+```
+
+Then start the six-hour test with ten million generated records per operation:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File tools/Run-SpillFlowSoak.ps1 -DurationMinutes 360 -InputRecords 10000000 -SpillMemoryMb 64
+```
+
+Each execution writes to a timestamped directory under `artifacts/soak`. Create
+the empty `STOP` file shown by the runner to stop gracefully after the current
+operation. The final decision record is `summary.json`; `failure.txt` is created
+when a process, measurement, or correctness check fails.
