@@ -3,6 +3,16 @@
 All notable changes to this project are documented here. SpillFlow follows
 [Semantic Versioning](https://semver.org/) after the `0.x` development series.
 
+## 0.3.0-alpha.7 - 2026-08-24
+
+- Added bounded batching for oversized streaming-join partitions.
+- One right-partition scan now serves up to `HotKeyJoinBatchSize` left records instead of one record.
+- Uses one-item bounded channels and backpressure to broadcast matches without materializing a hot group.
+- Preserves left-result order and recoverable output checkpoint semantics.
+- Detects result selectors that return before consuming their hot-key match stream.
+- Added `HotKeyJoinBatches` and `HotKeyPartitionScans` session telemetry.
+- Verified 130 hot-key left records use five scans with a batch size of 32 instead of 130 scans.
+
 ## 0.3.0-alpha.6 - 2026-08-24
 
 - Added `GroupJoinStreamRecoverableSpill` with independent durable left and right source offsets.

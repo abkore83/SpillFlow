@@ -261,15 +261,24 @@ public static class SpillExtensions
 
                 if (leaf.Left is not null)
                 {
-                    await foreach (var item in RecordFile.ReadAsync<TLeft>(leaf.Left, session, cancellationToken)
-                                       .ConfigureAwait(false))
+                    if (!materializeRight)
                     {
-                        var key = leftKeySelector(item);
-                        IAsyncEnumerable<TRight> matches = materializeRight
-                            ? EnumerateAsync(lookup is not null && lookup.TryGetValue(key, out var values) ? values : [],
-                                cancellationToken)
-                            : ReadMatchesAsync(leaf.Right!, session, key, rightKeySelector, comparer, cancellationToken);
-                        yield return await resultSelector(item, matches, cancellationToken).ConfigureAwait(false);
+                        await foreach (var result in HotKeyJoinBatcher.JoinAsync(
+                                           leaf.Left, leaf.Right!, session, leftKeySelector, rightKeySelector,
+                                           resultSelector, comparer, 0, cancellationToken).ConfigureAwait(false))
+                            yield return result;
+                    }
+                    else
+                    {
+                        await foreach (var item in RecordFile.ReadAsync<TLeft>(leaf.Left, session, cancellationToken)
+                                           .ConfigureAwait(false))
+                        {
+                            var key = leftKeySelector(item);
+                            var matches = EnumerateAsync(
+                                lookup is not null && lookup.TryGetValue(key, out var values) ? values : [],
+                                cancellationToken);
+                            yield return await resultSelector(item, matches, cancellationToken).ConfigureAwait(false);
+                        }
                     }
                 }
 

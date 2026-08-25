@@ -35,6 +35,8 @@ public sealed class SpillOptions
     public long? MaxProcessPrivateMemoryBytes { get; init; }
     /// <summary>Gets the minimum interval between process private-memory samples.</summary>
     public TimeSpan ProcessMemoryCheckInterval { get; init; } = TimeSpan.FromSeconds(1);
+    /// <summary>Gets the maximum left records sharing one scan of an oversized right join partition.</summary>
+    public int HotKeyJoinBatchSize { get; init; } = 64;
 
     internal void Validate()
     {
@@ -53,6 +55,8 @@ public sealed class SpillOptions
         if (MaxProcessPrivateMemoryBytes is not null)
             ArgumentOutOfRangeException.ThrowIfLessThan(MaxProcessPrivateMemoryBytes.Value, 1);
         ArgumentOutOfRangeException.ThrowIfLessThan(ProcessMemoryCheckInterval, TimeSpan.Zero);
+        ArgumentOutOfRangeException.ThrowIfLessThan(HotKeyJoinBatchSize, 1);
+        ArgumentOutOfRangeException.ThrowIfGreaterThan(HotKeyJoinBatchSize, 4_096);
         if (EncryptionKey is not null && EncryptionKey.Length is not (16 or 24 or 32))
             throw new ArgumentException("EncryptionKey must contain 16, 24, or 32 bytes.", nameof(EncryptionKey));
     }
@@ -74,6 +78,8 @@ public sealed class SpillResourceLimitException(string message) : InvalidOperati
 /// <param name="CurrentDiskBytes">The currently reserved physical spill bytes.</param>
 /// <param name="PeakDiskBytes">The greatest number of simultaneously reserved physical spill bytes.</param>
 /// <param name="PeakObservedProcessPrivateMemoryBytes">The greatest sampled process private-memory size.</param>
+/// <param name="HotKeyJoinBatches">The number of bounded left batches processed against oversized right partitions.</param>
+/// <param name="HotKeyPartitionScans">The number of full oversized right-partition scans.</param>
 public sealed record SpillStatistics(
     long RecordsRead,
     long RecordsWritten,
@@ -85,4 +91,6 @@ public sealed record SpillStatistics(
     long BlocksWritten,
     long CurrentDiskBytes,
     long PeakDiskBytes,
-    long PeakObservedProcessPrivateMemoryBytes);
+    long PeakObservedProcessPrivateMemoryBytes,
+    long HotKeyJoinBatches,
+    long HotKeyPartitionScans);

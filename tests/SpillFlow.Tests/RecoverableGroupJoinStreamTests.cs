@@ -187,10 +187,16 @@ public sealed class RecoverableGroupJoinStreamTests
             }
 
             await using var recovered = SpillSession.Recover(workingDirectory, Options(root));
+            var recoveredSelectorCalls = 0;
             var replayed = await CollectAsync(recovered.GroupJoinStreamRecoverableSpill<int, int, int, JoinResult>(
                 (offset, token) => throw new InvalidOperationException("Output recovery must not reopen the left source."),
                 (offset, token) => throw new InvalidOperationException("Output recovery must not reopen the right source."),
-                "hot-output", _ => 1, _ => 1, SelectResult,
+                "hot-output", _ => 1, _ => 1,
+                async (left, matches, cancellationToken) =>
+                {
+                    recoveredSelectorCalls++;
+                    return await SelectResult(left, matches, cancellationToken);
+                },
                 outputCheckpointInterval: replayWindow));
 
             var overlap = delivered.Intersect(replayed).Count();
@@ -202,6 +208,9 @@ public sealed class RecoverableGroupJoinStreamTests
                 Assert.Equal(20_000, value.MatchCount);
                 Assert.Equal(199_990_000, value.MatchSum);
             });
+            Assert.Equal(7, recoveredSelectorCalls);
+            Assert.Equal(1, recovered.Statistics.HotKeyJoinBatches);
+            Assert.Equal(1, recovered.Statistics.HotKeyPartitionScans);
             Assert.InRange(recovered.Statistics.PeakLeasedBytes, 1, Options(root).MemoryLimitBytes * 3 / 4);
         }
         finally
@@ -253,7 +262,8 @@ public sealed class RecoverableGroupJoinStreamTests
         MemoryLimitBytes = 64 * 1024,
         PartitionCount = 8,
         RecursivePartitionCount = 4,
-        MaxPartitionDepth = 2
+        MaxPartitionDepth = 2,
+        HotKeyJoinBatchSize = 64
     };
 
     private static string NewRoot()

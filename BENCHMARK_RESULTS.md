@@ -76,12 +76,31 @@ LINQ is the best choice when the full state comfortably fits memory. SpillFlow
 is intended for workloads where that cannot be guaranteed. The billion-row run
 demonstrates the crossover: LINQ fails, while both disk-backed libraries finish.
 
+## Hot-key streaming-join batching
+
+Measured on August 24, 2026 with 128 left records sharing one key, 50,000 right
+records sharing that key, and a 1 MiB SpillFlow session budget. Both runs
+returned 128 results with checksum `5,094,080`. Batch size 1 represents the
+previous one-scan-per-left strategy using the same implementation and input.
+
+| Batch size | Right scans | Wall time | CPU time | Managed allocations | Peak working set |
+| ---: | ---: | ---: | ---: | ---: | ---: |
+| 1 | 128 | 24.04s | 109.53s | 1.48 GB | 55.6 MB |
+| 32 | 4 | 4.18s | 35.64s | 18.5 MB | 54.1 MB |
+
+Batching reduced right-partition scans by 32 times, wall time by 5.75 times,
+CPU time by 3.07 times, and cumulative managed allocations by about 79.7 times
+in this single run. Peak working set remained similar. These numbers demonstrate
+the intended mechanism but are not confidence intervals.
+
 ## Reproduce
 
 ```powershell
 $env:DOTNET_GCHeapHardLimit='0x40000000'
 dotnet run -c Release --project benchmarks/SpillFlow.ResourceBenchmarks -- spill distinct 100000000 64
 dotnet run -c Release --project benchmarks/SpillFlow.ResourceBenchmarks -- external distinct 100000000 64
+dotnet run -c Release --project benchmarks/SpillFlow.ResourceBenchmarks -- spill hotjoin 128 1 1 50000
+dotnet run -c Release --project benchmarks/SpillFlow.ResourceBenchmarks -- spill hotjoin 128 1 32 50000
 ```
 
 These are single-run measurements, not confidence intervals. Storage hardware,

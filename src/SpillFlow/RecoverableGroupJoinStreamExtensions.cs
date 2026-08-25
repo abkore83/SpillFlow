@@ -226,27 +226,30 @@ public static class RecoverableGroupJoinStreamExtensions
                 }
             }
 
-            var outputPosition = 0L;
             var delivered = state.OutputRecordsCheckpointed;
             if (left is not null)
-                await foreach (var item in RecordFile.ReadAsync<TLeft>(left, session, cancellationToken)
-                                   .ConfigureAwait(false))
+            {
+                IAsyncEnumerable<TResult> results;
+                if (materializeRight)
                 {
-                    if (outputPosition++ < state.OutputRecordsCheckpointed)
-                        continue;
-                    var key = leftKeySelector(item);
-                    IAsyncEnumerable<TRight> matches = materializeRight
-                        ? EnumerateAsync(lookup is not null && lookup.TryGetValue(key, out var values) ? values : [],
-                            cancellationToken)
-                        : ReadMatchesAsync(right!, session, key, rightKeySelector, comparer, cancellationToken);
-                    yield return await resultSelector(item, matches, cancellationToken).ConfigureAwait(false);
+                    results = JoinMaterializedAsync(left, lookup, session, leftKeySelector, resultSelector,
+                        state.OutputRecordsCheckpointed, cancellationToken);
+                }
+                else
+                {
+                    results = HotKeyJoinBatcher.JoinAsync(left, right!, session, leftKeySelector, rightKeySelector,
+                        resultSelector, comparer, state.OutputRecordsCheckpointed, cancellationToken);
+                }
+
+                await foreach (var result in results.ConfigureAwait(false))
+                {
+                    yield return result;
                     delivered++;
                     if (delivered % outputCheckpointInterval == 0)
                         await SaveAsync(state with { OutputRecordsCheckpointed = delivered }).ConfigureAwait(false);
                 }
+            }
 
-            if (outputPosition < state.OutputRecordsCheckpointed)
-                throw new InvalidDataException("The recoverable streaming-join checkpoint exceeds its left partition.");
             await SaveAsync(state with
             {
                 OutputPairIndex = pairIndex + 1,
@@ -270,6 +273,31 @@ public static class RecoverableGroupJoinStreamExtensions
             yield return value;
         }
         await Task.CompletedTask;
+    }
+
+    private static async IAsyncEnumerable<TResult> JoinMaterializedAsync<TLeft, TRight, TKey, TResult>(
+        string leftPath,
+        Dictionary<TKey, List<TRight>>? lookup,
+        SpillSession session,
+        Func<TLeft, TKey> leftKeySelector,
+        Func<TLeft, IAsyncEnumerable<TRight>, CancellationToken, ValueTask<TResult>> resultSelector,
+        long skipLeftRecords,
+        [EnumeratorCancellation] CancellationToken cancellationToken)
+        where TKey : notnull
+    {
+        var leftPosition = 0L;
+        await foreach (var item in RecordFile.ReadAsync<TLeft>(leftPath, session, cancellationToken)
+                           .ConfigureAwait(false))
+        {
+            if (leftPosition++ < skipLeftRecords)
+                continue;
+            var key = leftKeySelector(item);
+            var matches = EnumerateAsync(
+                lookup is not null && lookup.TryGetValue(key, out var values) ? values : [], cancellationToken);
+            yield return await resultSelector(item, matches, cancellationToken).ConfigureAwait(false);
+        }
+        if (leftPosition < skipLeftRecords)
+            throw new InvalidDataException("The recoverable streaming-join checkpoint exceeds its left partition.");
     }
 
     private static async IAsyncEnumerable<TRight> ReadMatchesAsync<TRight, TKey>(

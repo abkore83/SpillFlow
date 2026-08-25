@@ -73,6 +73,15 @@ public sealed class ProcessMemoryTests
             new SpillSession(Options(threshold: 100, interval: TimeSpan.FromMilliseconds(-1))));
     }
 
+    [Fact]
+    public void Options_reject_invalid_hot_key_join_batch_sizes()
+    {
+        Assert.Throws<ArgumentOutOfRangeException>(() =>
+            new SpillSession(new SpillOptions { HotKeyJoinBatchSize = 0 }));
+        Assert.Throws<ArgumentOutOfRangeException>(() =>
+            new SpillSession(new SpillOptions { HotKeyJoinBatchSize = 4_097 }));
+    }
+
     private static SpillOptions Options(long? threshold, TimeSpan? interval = null) => new()
     {
         TemporaryDirectory = Path.GetTempPath(),

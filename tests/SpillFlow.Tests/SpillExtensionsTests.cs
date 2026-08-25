@@ -115,23 +115,54 @@ public sealed class SpillExtensionsTests
     [Fact]
     public async Task GroupJoinStreamSpill_processes_a_hot_key_without_materializing_the_group()
     {
-        await using var session = TinySession().RegisterCodec(new RowCodec());
-        var left = new[] { new Row(7, "left"), new Row(8, "no matches") };
-        var hotPartition = Enumerable.Range(0, 10_000).Select(_ => new Row(7, "right"));
+        await using var session = new SpillSession(new SpillOptions
+        {
+            MemoryLimitBytes = 64 * 1024,
+            PartitionCount = 2,
+            RecursivePartitionCount = 4,
+            MaxPartitionDepth = 1,
+            HotKeyJoinBatchSize = 32
+        });
+        var left = Enumerable.Range(0, 130).ToArray();
+        var hotPartition = Enumerable.Range(0, 10_000);
 
         var result = await CollectAsync(AsAsync(left).GroupJoinStreamSpill(
-            AsAsync(hotPartition), session, row => row.Id, row => row.Id,
+            AsAsync(hotPartition), session, _ => 7, _ => 7,
             async (leftItem, matches, cancellationToken) =>
             {
                 var count = 0;
                 await foreach (var match in matches.WithCancellation(cancellationToken))
                     count++;
-                return (leftItem.Id, Count: count);
+                return (Left: leftItem, Count: count);
             }));
 
-        Assert.Equal(new[] { (7, 10_000), (8, 0) }, result.OrderBy(item => item.Id));
+        Assert.Equal(130, result.Count);
+        Assert.Equal(Enumerable.Range(0, 130), result.Select(item => item.Left));
+        Assert.All(result, item => Assert.Equal(10_000, item.Count));
+        Assert.Equal(5, session.Statistics.HotKeyJoinBatches);
+        Assert.Equal(5, session.Statistics.HotKeyPartitionScans);
         Assert.True(session.Statistics.PeakLeasedBytes <= session.Options.MemoryLimitBytes * 3 / 4);
         Assert.True(session.Statistics.UsedDisk);
+    }
+
+    [Fact]
+    public async Task GroupJoinStreamSpill_rejects_a_selector_that_abandons_a_hot_match_stream()
+    {
+        await using var session = new SpillSession(new SpillOptions
+        {
+            MemoryLimitBytes = 64 * 1024,
+            PartitionCount = 2,
+            RecursivePartitionCount = 4,
+            MaxPartitionDepth = 1
+        }).RegisterCodec(new RowCodec());
+        var operation = AsAsync(new[] { new Row(7, "left") }).GroupJoinStreamSpill(
+            AsAsync(Enumerable.Range(0, 10_000).Select(_ => new Row(7, "right"))),
+            session, row => row.Id, row => row.Id,
+            (left, matches, cancellationToken) => ValueTask.FromResult(left.Id));
+
+        var error = await Assert.ThrowsAsync<InvalidOperationException>(() => CollectAsync(operation));
+
+        Assert.Contains("before consuming", error.Message);
     }
 
     [Fact]

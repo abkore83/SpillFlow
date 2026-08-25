@@ -13,7 +13,7 @@ SpillFlow is an experimental .NET 8 library for bounded-memory operations over
 ## Install
 
 ```powershell
-dotnet add package SpillFlow --version 0.3.0-alpha.6
+dotnet add package SpillFlow --version 0.3.0-alpha.7
 ```
 
 The package includes the codec source generator; no second analyzer package is
@@ -113,9 +113,14 @@ var counts = accounts.GroupJoinStreamSpill(
 ```
 
 When an oversized partition stops shrinking, the streaming operator reads its
-matches directly from disk. This keeps memory bounded. Multiple left records
-for the same oversized key may rescan that disk partition, so callers should
-prefer grouped aggregation when they only need a count, sum, or other summary.
+matches directly from disk. Left records are processed in bounded batches, and
+one right-partition scan broadcasts matches to every consumer in that batch
+through one-item channels with backpressure. `HotKeyJoinBatchSize` controls the
+maximum batch size and defaults to 64. `HotKeyJoinBatches` and
+`HotKeyPartitionScans` expose the actual work in session statistics. This keeps
+memory bounded and reduces scans from one per left record to approximately one
+per batch. Grouped aggregation remains preferable when callers need only a
+count, sum, or other summary.
 
 Sorting is stable for equal keys and enforces `MergeFanIn` through bounded
 multi-pass merging. Hash operators
@@ -204,8 +209,9 @@ the documented at-least-once replay window.
 
 `GroupJoinStreamRecoverableSpill` provides the same two independent source
 offsets as recoverable ExceptBy while preserving the streaming hot-key path.
-If a right partition cannot fit after recursive refinement, each left record's
-matches are filtered directly from disk and passed as an asynchronous stream.
+If a right partition cannot fit after recursive refinement, a bounded batch of
+left records shares each disk scan and receives matches through asynchronous
+streams.
 Acknowledged left records are skipped without rerunning the result selector.
 The selector must consume the match stream before returning and tolerate being
 called again for an uncheckpointed output after interruption.
@@ -221,8 +227,8 @@ checkpoints, operator-managed recovery for external ordering, recoverable
 distinct, ExceptBy, grouped aggregation, and streaming joins, plus optional
 process private-memory monitoring. The materialized-list join remains available
 for groups that fit RAM; recoverable workloads should use the streaming join.
-hot-key performance optimization, secure-deletion limitations, and statistically
-repeated benchmarks on multiple storage devices.
+Remaining work includes secure-deletion policy and statistically repeated
+benchmarks on multiple storage devices.
 
 ## Security
 

@@ -177,8 +177,16 @@ into smaller keys. `GroupJoinSpill` fails safely when its required
 `IReadOnlyList` cannot fit. `GroupJoinStreamSpill` provides the bounded
 alternative: its callback consumes matches through `IAsyncEnumerable`. When a
 partition stops shrinking, SpillFlow streams matching records from disk rather
-than repeating all remaining hash depths. Several left records sharing the same
-oversized key can cause repeated disk scans.
+than repeating all remaining hash depths.
+
+For an oversized leaf, SpillFlow collects a bounded left batch and creates a
+key-to-consumer map. It scans the right partition once, routes each record to all
+matching consumers through capacity-one channels, and applies backpressure when
+a consumer is slower than disk input. Results are returned in original left
+order. The maximum batch count is `HotKeyJoinBatchSize`, while an additional
+quarter-budget threshold limits estimated batch state. This changes the scan
+count from one per left record to roughly one per batch without caching the
+oversized match group.
 
 ### Grouped aggregation
 
@@ -337,8 +345,8 @@ output handling should perform idempotent or transactional effects.
 `GroupJoinStreamRecoverableSpill` applies the two-source protocol to left and
 right input chunks. Paired refinement checks whether the right side can be
 materialized. A shrinking partition uses an in-memory lookup under a lease; an
-unsplittable hot-key partition remains on disk and is filtered as an async match
-stream for each left record. Output checkpoints count completed left records.
+unsplittable hot-key partition remains on disk and is broadcast to a bounded
+batch of async match streams. Output checkpoints count completed left records.
 Recovery skips acknowledged left records without invoking the result selector
 and may recompute only the unacknowledged tail of the active pair.
 
@@ -410,8 +418,6 @@ their own representative tests before choosing either implementation.
 SpillFlow is an alpha prototype, not yet a production banking library. Important
 remaining work includes:
 
-- reduce repeated disk scans when many left records share one oversized join key
-- extend operator-managed phase recovery from ordering to hash operators
 - run repeated benchmarks with confidence intervals
 - publish full hardware and storage details
 - test multiple operating systems and storage devices

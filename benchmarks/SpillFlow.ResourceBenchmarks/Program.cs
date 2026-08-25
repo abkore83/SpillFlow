@@ -8,6 +8,8 @@ var implementation = args.ElementAtOrDefault(0)?.ToLowerInvariant() ?? "spill";
 var operation = args.ElementAtOrDefault(1)?.ToLowerInvariant() ?? "distinct";
 var inputCount = int.TryParse(args.ElementAtOrDefault(2), out var parsedCount) ? parsedCount : 1_000_000;
 var spillMemoryMb = int.TryParse(args.ElementAtOrDefault(3), out var parsedMemory) ? parsedMemory : 64;
+var hotKeyBatchSize = int.TryParse(args.ElementAtOrDefault(4), out var parsedBatchSize) ? parsedBatchSize : 64;
+var hotRightCount = int.TryParse(args.ElementAtOrDefault(5), out var parsedRightCount) ? parsedRightCount : 50_000;
 var uniqueKeys = Math.Max(1, inputCount / 10);
 
 GC.Collect();
@@ -48,9 +50,11 @@ if (implementation == "spill")
     {
         MemoryLimitBytes = (long)spillMemoryMb * 1024 * 1024,
         MaxDiskUsageBytes = 20L * 1024 * 1024 * 1024,
-        PartitionCount = 64,
+        PartitionCount = operation == "hotjoin" ? 2 : 64,
         RecursivePartitionCount = 16,
-        MergeFanIn = 16
+        MergeFanIn = 16,
+        MaxPartitionDepth = operation == "hotjoin" ? 1 : 4,
+        HotKeyJoinBatchSize = hotKeyBatchSize
     });
     session.RegisterCodec(new BankRowCodec());
     result = operation switch
@@ -67,6 +71,15 @@ if (implementation == "spill")
             (state, row) => (state.Count + 1, state.Sum + row.Amount),
             (key, state) => new AggregateRow { Key = key, Count = state.Count, Sum = state.Sum }),
             row => StableAggregateMetricHash(row.Key, row.Count, row.Sum)),
+        "hotjoin" => await Consume(HotRows(inputCount).GroupJoinStreamSpill(
+            HotRows(hotRightCount), session, row => row.Id, row => row.Id,
+            async (row, matches, cancellationToken) =>
+            {
+                var count = 0;
+                await foreach (var _ in matches.WithCancellation(cancellationToken))
+                    count++;
+                return new MetricRow { Key = (int)row.Amount, Value = count };
+            }), row => StableMetricHash(row.Key, row.Value)),
         _ => throw new ArgumentException($"Unsupported operation '{operation}'.")
     };
     spillStatistics = session.Statistics;
@@ -145,6 +158,8 @@ var measurement = new ResourceMeasurement
     PeakSpillDiskBytes = spillStatistics?.PeakDiskBytes ?? 0,
     PeakLeasedBytes = spillStatistics?.PeakLeasedBytes ?? 0,
     BlocksWritten = spillStatistics?.BlocksWritten ?? 0,
+    HotKeyJoinBatches = spillStatistics?.HotKeyJoinBatches ?? 0,
+    HotKeyPartitionScans = spillStatistics?.HotKeyPartitionScans ?? 0,
     GcHeapHardLimit = Environment.GetEnvironmentVariable("DOTNET_GCHeapHardLimit"),
     GcTotalAvailableMemoryBytes = GC.GetGCMemoryInfo().TotalAvailableMemoryBytes
 };
@@ -232,6 +247,17 @@ static async IAsyncEnumerable<BankRow> ReferenceRows(int uniqueKeys,
     await Task.CompletedTask;
 }
 
+static async IAsyncEnumerable<BankRow> HotRows(int count,
+    [EnumeratorCancellation] CancellationToken cancellationToken = default)
+{
+    for (var index = 0; index < count; index++)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        yield return new BankRow { Id = 1, Amount = index };
+    }
+    await Task.CompletedTask;
+}
+
 public sealed class BankRow
 {
     public int Id { get; set; }
@@ -290,6 +316,8 @@ public sealed class ResourceMeasurement
     public long PeakSpillDiskBytes { get; set; }
     public long PeakLeasedBytes { get; set; }
     public long BlocksWritten { get; set; }
+    public long HotKeyJoinBatches { get; set; }
+    public long HotKeyPartitionScans { get; set; }
     public string? GcHeapHardLimit { get; set; }
     public long GcTotalAvailableMemoryBytes { get; set; }
 }

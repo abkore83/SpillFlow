@@ -27,6 +27,8 @@ public sealed class SpillSession : IAsyncDisposable
     private readonly Func<long> _processPrivateMemoryProvider;
     private long _lastProcessMemoryCheckTick;
     private long _peakObservedProcessPrivateMemory;
+    private long _hotKeyJoinBatches;
+    private long _hotKeyPartitionScans;
 
     /// <summary>Gets the validated options used by this session.</summary>
     public SpillOptions Options { get; }
@@ -50,7 +52,9 @@ public sealed class SpillSession : IAsyncDisposable
         Interlocked.Read(ref _blocksWritten),
         Interlocked.Read(ref _currentDiskBytes),
         Interlocked.Read(ref _peakDiskBytes),
-        Interlocked.Read(ref _peakObservedProcessPrivateMemory));
+        Interlocked.Read(ref _peakObservedProcessPrivateMemory),
+        Interlocked.Read(ref _hotKeyJoinBatches),
+        Interlocked.Read(ref _hotKeyPartitionScans));
 
     /// <summary>Creates a new spill session.</summary>
     public SpillSession(SpillOptions? options = null) : this(options ?? new SpillOptions(), null, null)
@@ -266,6 +270,10 @@ public sealed class SpillSession : IAsyncDisposable
     }
 
     internal void WroteBlock() => Interlocked.Increment(ref _blocksWritten);
+
+    internal void ProcessedHotKeyJoinBatch() => Interlocked.Increment(ref _hotKeyJoinBatches);
+
+    internal void ScannedHotKeyPartition() => Interlocked.Increment(ref _hotKeyPartitionScans);
 
     internal void ReserveDisk(long bytes)
     {

@@ -14,6 +14,7 @@
 - Session directories use current-user-only Windows ACLs or owner-only Unix permissions by default.
 - Recovery reapplies private directory permissions before reading preserved data.
 - `GroupJoinStreamSpill` handles unsplittable hot-key groups with a bounded asynchronous match stream.
+- Oversized streaming joins batch left consumers so one right scan serves many records, with scan telemetry.
 - `OrderBySpill` preserves encounter order for equal keys across all merge passes.
 - `OrderByRecoverableSpill` resumes durable input-run, merge, and output phases.
 - `DistinctRecoverableSpill` resumes durable input, partition, and output phases without reopening a fully consumed source.
@@ -32,8 +33,10 @@
    system, container, or service-level memory limit.
 2. `GroupJoinSpill` requires an `IReadOnlyList` and therefore still rejects a
    group that cannot fit its memory lease. `GroupJoinStreamSpill` is the bounded
-   alternative, but it may rescan an oversized right partition for each left
-   record sharing that key.
+   alternative. It now scans an oversized right partition once per bounded left
+   batch rather than once per left record. Very large left groups still require
+   multiple scans; increasing `HotKeyJoinBatchSize` reduces scans but retains
+   more concurrent selector and channel state.
 3. Operator-managed phase recovery covers ordering, distinct, ExceptBy, grouped
    aggregation, and streaming joins. The materialized-list join still relies on
    caller checkpoints; recoverable callers can use the streaming form instead.
@@ -54,6 +57,6 @@
 
 SpillFlow now addresses the original correctness and resource-control blockers,
 and its billion-row Distinct test completes under a 1 GiB managed-memory cap.
-It is still a pre-production library. Before banking deployment, prioritize
-recovery support for hash operators, hot-key performance optimization,
-secure-deletion policy, and broader soak testing.
+It is still a pre-production library. Before banking deployment, prioritize a
+secure-deletion policy, transactional or idempotent output integration, and
+broader repeated soak and storage testing.
