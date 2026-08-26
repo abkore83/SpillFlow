@@ -19,7 +19,8 @@ public static class SpillExtensions
         var spillBatchSeen = new HashSet<TKey>(comparer);
         var buffered = new List<TSource>();
         long estimatedBytes = 0;
-        var spillBatchKeyLimit = Math.Max(1_024, session.Options.MemoryLimitBytes / 64);
+        var inMemoryDistinctLimit = Math.Max(16 * 1024, session.Options.MemoryLimitBytes / 4);
+        var spillBatchKeyLimit = Math.Max(1_024, session.Options.MemoryLimitBytes / 256);
         PartitionWriter<TSource>? partitions = null;
 
         try
@@ -34,7 +35,7 @@ public static class SpillExtensions
                         continue;
                     buffered.Add(item);
                     estimatedBytes += RecordFile.EstimateSize(item, session) + 48;
-                    if (estimatedBytes < session.Options.MemoryLimitBytes * 3 / 4)
+                    if (estimatedBytes < inMemoryDistinctLimit)
                         continue;
 
                     partitions = new PartitionWriter<TSource>(session);
