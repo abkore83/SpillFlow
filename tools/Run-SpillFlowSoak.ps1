@@ -53,8 +53,9 @@ public static class SpillFlowPowerRequest
     public static extern uint SetThreadExecutionState(uint flags);
 }
 '@
-    # ES_CONTINUOUS | ES_SYSTEM_REQUIRED. This prevents system sleep but does not force the display to stay on.
-    $sleepBlockEnabled = [SpillFlowPowerRequest]::SetThreadExecutionState(2147483649) -ne 0
+    # ES_CONTINUOUS | ES_SYSTEM_REQUIRED | ES_AWAYMODE_REQUIRED.
+    # This keeps unattended desktop qualification active while allowing the display to turn off.
+    $sleepBlockEnabled = [SpillFlowPowerRequest]::SetThreadExecutionState(2147483713) -ne 0
     if (-not $sleepBlockEnabled) { throw 'Windows refused the system-sleep prevention request.' }
 }
 

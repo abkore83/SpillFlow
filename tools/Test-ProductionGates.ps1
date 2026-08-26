@@ -4,7 +4,7 @@ param(
     [int]$InputRecords = 10000000,
 
     [ValidateRange(1, 20)]
-    [int]$Repetitions = 3,
+    [int]$Repetitions = 5,
 
     [ValidateRange(1, 65536)]
     [int]$SpillMemoryMb = 64,
@@ -48,13 +48,6 @@ try {
         Invoke-Checked 'unit-tests' { dotnet test (Join-Path $projectRoot 'SpillFlow.sln') -c Release --no-build --no-restore }
     }
 
-    if (-not $SkipFailureHarness) {
-        Invoke-Checked 'all-operator-failure-harness' {
-            dotnet run -c Release --no-build --project (Join-Path $projectRoot 'tools/SpillFlow.FailureHarness') -- `
-                --output (Join-Path $output 'failure-harness')
-        }
-    }
-
     [xml]$coreProject = Get-Content (Join-Path $projectRoot 'src/SpillFlow/SpillFlow.csproj')
     $runtimePackages = @($coreProject.Project.ItemGroup.PackageReference |
         Where-Object { $null -ne $_ -and -not [string]::IsNullOrWhiteSpace($_.Include) })
@@ -77,9 +70,12 @@ try {
     })
 
     Invoke-Checked 'benchmark-build' { dotnet build $benchmarkProject -c Release --no-restore -p:NoWarn=NU1900 }
+    Invoke-Checked 'benchmark-isolation' { dotnet build-server shutdown }
+    Start-Sleep -Seconds 5
     $env:DOTNET_GCHeapHardLimit = '0x40000000'
     $operations = @('distinct', 'orderby', 'exceptby', 'groupjoin', 'aggregate')
     $measurements = @{}
+    $rawMeasurements = [ordered]@{}
     foreach ($operation in $operations) {
         $runs = @()
         for ($run = 1; $run -le $Repetitions; $run++) {
@@ -102,7 +98,11 @@ try {
             peakLeasedBytes = $peakLease
             outputSignature = $signatures[0]
         }
+        $rawMeasurements[$operation] = $runs
     }
+
+    $rawMeasurements | ConvertTo-Json -Depth 8 |
+        Set-Content (Join-Path $output 'benchmark-samples.json') -Encoding utf8
 
     $current = [ordered]@{
         schemaVersion = 1
@@ -112,6 +112,8 @@ try {
         repetitions = $Repetitions
         measurements = $measurements
     }
+    $current | ConvertTo-Json -Depth 8 |
+        Set-Content (Join-Path $output 'benchmark-current.json') -Encoding utf8
     if ($UpdateBaseline) {
         New-Item -ItemType Directory -Force -Path (Split-Path $baselinePath) | Out-Null
         $current | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath $baselinePath -Encoding utf8
@@ -125,6 +127,20 @@ try {
             throw "Baseline input or memory configuration does not match this run."
         }
         $factor = 1.0 + $RegressionPercent / 100.0
+        $comparisons = [ordered]@{}
+        foreach ($operation in $operations) {
+            $expected = $baseline.measurements.$operation
+            $actual = $measurements[$operation]
+            $comparisons[$operation] = [ordered]@{
+                performanceDeltaPercent = (($actual.wallMilliseconds / $expected.wallMilliseconds) - 1.0) * 100.0
+                allocationDeltaPercent = (($actual.allocatedBytes / $expected.allocatedBytes) - 1.0) * 100.0
+                workingSetDeltaPercent = (($actual.peakWorkingSetBytes / $expected.peakWorkingSetBytes) - 1.0) * 100.0
+                actual = $actual
+                baseline = $expected
+            }
+        }
+        $comparisons | ConvertTo-Json -Depth 10 |
+            Set-Content (Join-Path $output 'benchmark-comparison.json') -Encoding utf8
         foreach ($operation in $operations) {
             $expected = $baseline.measurements.$operation
             $actual = $measurements[$operation]
@@ -140,6 +156,15 @@ try {
             if ($actual.peakWorkingSetBytes -gt $expected.peakWorkingSetBytes * $factor) {
                 throw "$operation peak working set regressed by more than $RegressionPercent percent."
             }
+        }
+    }
+
+    # Fault-injection work can leave transient disk and security-scanner load behind.
+    # Run it after timing-sensitive gates so it cannot contaminate performance evidence.
+    if (-not $SkipFailureHarness) {
+        Invoke-Checked 'all-operator-failure-harness' {
+            dotnet run -c Release --no-build --project (Join-Path $projectRoot 'tools/SpillFlow.FailureHarness') -- `
+                --output (Join-Path $output 'failure-harness')
         }
     }
 

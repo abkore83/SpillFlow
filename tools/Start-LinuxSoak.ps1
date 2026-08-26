@@ -40,7 +40,8 @@ function Write-LauncherLog([string]$Message) {
 
 $sleepBlockEnabled = $false
 try {
-    $sleepBlockEnabled = [SpillFlowLinuxSoakPowerRequest]::SetThreadExecutionState(2147483649) -ne 0
+    # ES_CONTINUOUS | ES_SYSTEM_REQUIRED | ES_AWAYMODE_REQUIRED.
+    $sleepBlockEnabled = [SpillFlowLinuxSoakPowerRequest]::SetThreadExecutionState(2147483713) -ne 0
     if (-not $sleepBlockEnabled) { throw 'Windows refused the system-sleep prevention request.' }
 
     $existing = docker ps -a --filter "name=^/$ContainerName$" --format '{{.Names}}'
