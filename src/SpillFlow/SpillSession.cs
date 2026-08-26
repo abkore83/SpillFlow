@@ -73,7 +73,6 @@ public sealed class SpillSession : IAsyncDisposable
         _processPrivateMemoryProvider = processPrivateMemoryProvider ?? ReadProcessPrivateMemory;
         CheckProcessMemory("session creation", force: true);
         _memoryPool = new SpillMemoryPool((long)(Options.MemoryLimitBytes * 0.75));
-        EncryptionKey = Options.EncryptionKey?.ToArray();
         var root = Options.TemporaryDirectory ?? Path.GetTempPath();
         if (recoveryDirectory is null && Options.CleanupAbandonedSessions)
             CleanupAbandoned(root, Options.AbandonedSessionAge);
@@ -92,12 +91,14 @@ public sealed class SpillSession : IAsyncDisposable
         else
         {
             WorkingDirectory = Path.GetFullPath(recoveryDirectory);
+            RejectReparsePoint(WorkingDirectory, "recovery directory");
+            var manifest = ReadManifest(WorkingDirectory, Options.MaxRecoveryMetadataBytes);
             if (Options.ProtectTemporaryDirectory)
                 SpillDirectorySecurity.ProtectExisting(WorkingDirectory);
-            var manifest = ReadManifest(WorkingDirectory);
             SessionId = manifest.SessionId;
             _createdUtc = manifest.CreatedUtc;
             var files = manifest.Files.Select(name => Path.Combine(WorkingDirectory, name)).Where(File.Exists).ToArray();
+            foreach (var path in files) RejectReparsePoint(path, "recovered spill file");
             foreach (var path in files) _paths.Add(path);
             _fileCount = manifest.NextFileNumber;
             var diskBytes = files.Sum(path => new FileInfo(path).Length);
@@ -107,6 +108,7 @@ public sealed class SpillSession : IAsyncDisposable
             _peakDiskBytes = diskBytes;
             RecoveredFiles = files;
         }
+        EncryptionKey = Options.EncryptionKey?.ToArray();
     }
 
     /// <summary>Opens a session preserved in an existing working directory.</summary>
@@ -143,7 +145,10 @@ public sealed class SpillSession : IAsyncDisposable
     /// <summary>Loads caller-defined state from a named checkpoint.</summary>
     public async ValueTask<T> LoadCheckpointAsync<T>(string name, CancellationToken cancellationToken = default)
     {
-        await using var stream = new FileStream(CheckpointPath(name), FileMode.Open, FileAccess.Read, FileShare.Read,
+        var path = CheckpointPath(name);
+        RejectReparsePoint(path, "recovery checkpoint");
+        EnsureMetadataSize(path, Options.MaxRecoveryMetadataBytes, "Recovery checkpoint");
+        await using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read,
             16 * 1024, FileOptions.Asynchronous | FileOptions.SequentialScan);
         return await JsonSerializer.DeserializeAsync<T>(stream, cancellationToken: cancellationToken).ConfigureAwait(false)
             ?? throw new InvalidDataException("Recovery checkpoint deserialized to null.");
@@ -324,16 +329,37 @@ public sealed class SpillSession : IAsyncDisposable
         }
     }
 
-    private static RecoveryManifest ReadManifest(string directory)
+    private static RecoveryManifest ReadManifest(string directory, long maxMetadataBytes)
     {
         var path = Path.Combine(directory, "session.manifest.json");
+        RejectReparsePoint(path, "recovery manifest");
+        EnsureMetadataSize(path, maxMetadataBytes, "Recovery manifest");
         var manifest = JsonSerializer.Deserialize<RecoveryManifest>(File.ReadAllText(path))
             ?? throw new InvalidDataException("Invalid spill recovery manifest.");
         if (manifest.ManifestVersion != 1 || manifest.BlockFormatVersion != SpillBlockFormat.Version)
             throw new InvalidDataException("Unsupported spill recovery format version.");
-        if (manifest.Files.Any(name => Path.GetFileName(name) != name))
+        if (!Guid.TryParseExact(manifest.SessionId, "N", out _))
+            throw new InvalidDataException("Recovery manifest contains an invalid session identifier.");
+        if (manifest.NextFileNumber < 0 || manifest.Files is null)
+            throw new InvalidDataException("Recovery manifest contains invalid file metadata.");
+        if (manifest.Files.Any(name => string.IsNullOrWhiteSpace(name) || Path.GetFileName(name) != name))
             throw new InvalidDataException("Recovery manifest contains an unsafe file name.");
+        if (manifest.Files.Distinct(StringComparer.Ordinal).Count() != manifest.Files.Length)
+            throw new InvalidDataException("Recovery manifest contains duplicate file names.");
         return manifest;
+    }
+
+    private static void EnsureMetadataSize(string path, long maximumBytes, string description)
+    {
+        var length = new FileInfo(path).Length;
+        if (length > maximumBytes)
+            throw new InvalidDataException($"{description} exceeds the configured metadata limit of {maximumBytes:N0} bytes.");
+    }
+
+    private static void RejectReparsePoint(string path, string description)
+    {
+        if ((File.GetAttributes(path) & FileAttributes.ReparsePoint) != 0)
+            throw new InvalidDataException($"The {description} must not be a symbolic link or reparse point.");
     }
 
     private static void UpdatePeak(ref long target, long value)
@@ -396,10 +422,18 @@ public sealed class SpillSession : IAsyncDisposable
     /// <summary>Deletes session files unless recovery preservation was requested.</summary>
     public ValueTask DisposeAsync()
     {
-        if (Directory.Exists(WorkingDirectory) && !_preserveForRecovery)
-            Directory.Delete(WorkingDirectory, recursive: true);
-        Interlocked.Exchange(ref _currentDiskBytes, 0);
-        return ValueTask.CompletedTask;
+        try
+        {
+            if (Directory.Exists(WorkingDirectory) && !_preserveForRecovery)
+                Directory.Delete(WorkingDirectory, recursive: true);
+            Interlocked.Exchange(ref _currentDiskBytes, 0);
+            return ValueTask.CompletedTask;
+        }
+        finally
+        {
+            if (EncryptionKey is not null)
+                CryptographicOperations.ZeroMemory(EncryptionKey);
+        }
     }
 
     private sealed record RecoveryManifest(int ManifestVersion, int BlockFormatVersion, string SessionId,

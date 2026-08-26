@@ -62,6 +62,59 @@ public sealed class RecoveryTests
             await session.SaveCheckpointAsync("../outside", new { Value = 1 }));
     }
 
+    [Fact]
+    public async Task Recovery_rejects_oversized_manifest_before_deserialization()
+    {
+        var root = Path.Combine(Path.GetTempPath(), $"spillflow-recovery-limit-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(root);
+        string workingDirectory;
+        try
+        {
+            await using (var session = new SpillSession(new SpillOptions
+            {
+                TemporaryDirectory = root,
+                CleanupAbandonedSessions = false,
+                ProtectTemporaryDirectory = false
+            }))
+            {
+                workingDirectory = session.WorkingDirectory;
+                session.PreserveForRecovery();
+            }
+
+            await File.WriteAllTextAsync(Path.Combine(workingDirectory, "session.manifest.json"), new string('x', 2_048));
+            var error = Assert.Throws<InvalidDataException>(() => SpillSession.Recover(workingDirectory,
+                new SpillOptions
+                {
+                    CleanupAbandonedSessions = false,
+                    ProtectTemporaryDirectory = false,
+                    MaxRecoveryMetadataBytes = 1_024
+                }));
+            Assert.Contains("metadata limit", error.Message);
+        }
+        finally
+        {
+            if (Directory.Exists(root)) Directory.Delete(root, true);
+        }
+    }
+
+    [Fact]
+    public async Task Disposal_clears_the_session_encryption_key_copy()
+    {
+        var configuredKey = Enumerable.Range(1, 32).Select(value => (byte)value).ToArray();
+        var session = new SpillSession(new SpillOptions
+        {
+            EncryptionKey = configuredKey,
+            CleanupAbandonedSessions = false
+        });
+        var sessionKey = Assert.IsType<byte[]>(session.EncryptionKey);
+        Assert.NotSame(configuredKey, sessionKey);
+
+        await session.DisposeAsync();
+
+        Assert.All(sessionKey, value => Assert.Equal(0, value));
+        Assert.NotEqual(new byte[configuredKey.Length], configuredKey);
+    }
+
     private sealed record RecoveryState(int SourcePosition, string SourceToken);
 
     private static void RelaxDirectoryPermissions(string path)

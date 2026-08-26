@@ -21,6 +21,8 @@ public sealed class SpillOptions
     public int IoBlockSizeBytes { get; init; } = 128 * 1024;
     /// <summary>Gets the maximum physical bytes reserved by session spill files.</summary>
     public long MaxDiskUsageBytes { get; init; } = 10L * 1024 * 1024 * 1024;
+    /// <summary>Gets the maximum accepted size of a recovery manifest or checkpoint JSON file.</summary>
+    public long MaxRecoveryMetadataBytes { get; init; } = 4L * 1024 * 1024;
     /// <summary>Gets whether stale session directories are removed when a new session starts.</summary>
     public bool CleanupAbandonedSessions { get; init; } = true;
     /// <summary>Gets the minimum age at which a session directory is considered abandoned.</summary>
@@ -51,6 +53,8 @@ public sealed class SpillOptions
         ArgumentOutOfRangeException.ThrowIfLessThan(IoBlockSizeBytes, 4 * 1024);
         ArgumentOutOfRangeException.ThrowIfGreaterThan(IoBlockSizeBytes, 16 * 1024 * 1024);
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(MaxDiskUsageBytes);
+        ArgumentOutOfRangeException.ThrowIfLessThan(MaxRecoveryMetadataBytes, 1_024);
+        ArgumentOutOfRangeException.ThrowIfGreaterThan(MaxRecoveryMetadataBytes, 64L * 1024 * 1024);
         ArgumentOutOfRangeException.ThrowIfLessThan(AbandonedSessionAge, TimeSpan.FromMinutes(1));
         if (MaxProcessPrivateMemoryBytes is not null)
             ArgumentOutOfRangeException.ThrowIfLessThan(MaxProcessPrivateMemoryBytes.Value, 1);
